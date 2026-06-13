@@ -11,7 +11,8 @@ machine: no upload, no server, no per-image cost.
 
 ```
 screen recording
-   │  decode.ts        WebCodecs / requestVideoFrameCallback → frames
+   │  decode.ts        WebCodecs (mp4box demux, every coded frame) → frames
+   │                   falls back to <video> + rVFC for unsupported codecs
    ▼
 frames
    │  loopDetect.ts    dedupe capture duplicates; SUGGEST a loop range
@@ -79,8 +80,10 @@ animation, and hit **Make GIF**.
 - [x] Native + Slack-sized export
 - [x] Manual loop selection: scrubber + draggable handles + looping preview
 - [x] Manual crop box (auto-tighten optional)
-- [ ] Manual crop *handles* (resize the box after drawing, nudge edges)
-- [ ] WebCodecs fast path (currently uses the `<video>` + rVFC fallback)
+- [x] Manual crop handles (resize the box after drawing)
+- [x] WebCodecs decode (every coded frame; `<video>` + rVFC is the fallback)
+- [x] Real per-frame timing (GIF uses source cadence, not a guessed fps)
+- [ ] GIF input support (WebCodecs can't decode GIF; needs a GIF demuxer)
 - [ ] Temporal smoothing / swap ISNet for **Robust Video Matting** to kill
       per-frame edge flicker
 - [ ] APNG / WebP export (smaller + truecolor) alongside GIF
