@@ -1,0 +1,164 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e0f13;
+  --panel: #171922;
+  --accent: #6ee7b7;
+  --text: #e6e8ee;
+  --muted: #9aa0ad;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  color: var(--muted);
+  margin-top: 0.25rem;
+}
+
+.step {
+  margin-top: 1.75rem;
+}
+
+.step h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.6rem;
+}
+
+.filepick {
+  display: block;
+  padding: 1.25rem;
+  background: var(--panel);
+  border: 1px dashed #2c2f3a;
+  border-radius: 12px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.filepick input {
+  display: none;
+}
+
+.cropwrap {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.cropcanvas {
+  max-width: 100%;
+  border-radius: 10px;
+  touch-action: none;
+  cursor: crosshair;
+  background: #000;
+}
+
+.cropbox {
+  position: absolute;
+  border: 2px solid var(--accent);
+  background: rgba(110, 231, 183, 0.12);
+  pointer-events: none;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+button {
+  background: var(--accent);
+  color: #07150f;
+  font-weight: 700;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.7rem 1.4rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.error {
+  color: #fca5a5;
+}
+
+.results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+figure {
+  margin: 0;
+  background: var(--panel);
+  padding: 0.75rem;
+  border-radius: 12px;
+}
+
+figure img {
+  max-width: 240px;
+  background:
+    conic-gradient(#222 25%, #2b2b2b 0 50%, #222 0 75%, #2b2b2b 0) 0 / 16px 16px;
+  border-radius: 6px;
+}
+
+figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+figcaption a {
+  color: var(--accent);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #2c2f3a;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  display: inline-block;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
