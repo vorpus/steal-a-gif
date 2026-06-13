@@ -1,8 +1,14 @@
 /** A single decoded frame held as an ImageBitmap plus its presentation time. */
 export interface Frame {
   bitmap: ImageBitmap;
-  /** Presentation timestamp in microseconds (from WebCodecs). */
+  /** Presentation timestamp in microseconds. */
   timestampUs: number;
+  /**
+   * How long this frame stays on screen, in microseconds — the gap to the next
+   * distinct frame. Set during dedupe so the GIF can use the recording's real
+   * (possibly variable) cadence instead of a single guessed fps.
+   */
+  durationUs?: number;
 }
 
 /** Axis-aligned crop rectangle in source-pixel coordinates. */

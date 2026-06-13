@@ -30,15 +30,47 @@ export function dedupeFrames(
 ): { frames: Frame[]; prints: Float32Array[] } {
   const eps = opts.epsilon ?? 0.004; // mean per-pixel delta below this == dup
   if (frames.length === 0) return { frames, prints };
-  const outF: Frame[] = [frames[0]];
-  const outP: Float32Array[] = [prints[0]];
+
+  // Keep the first frame of each run of near-identical frames. A kept frame's
+  // duration is the time until the NEXT kept frame — so merged duplicates
+  // (whether capture dupes or a held animation frame) contribute their real
+  // on-screen time, and playback speed is preserved exactly.
+  const keptIdx: number[] = [0];
   for (let i = 1; i < frames.length; i++) {
-    if (l1(prints[i], outP[outP.length - 1]) > eps) {
-      outF.push(frames[i]);
-      outP.push(prints[i]);
+    if (l1(prints[i], prints[keptIdx[keptIdx.length - 1]]) > eps) {
+      keptIdx.push(i);
     }
   }
+
+  const outF: Frame[] = [];
+  const outP: Float32Array[] = [];
+  for (let k = 0; k < keptIdx.length; k++) {
+    const i = keptIdx[k];
+    const nextTs =
+      k + 1 < keptIdx.length
+        ? frames[keptIdx[k + 1]].timestampUs
+        : frames[frames.length - 1].timestampUs +
+          medianFrameStep(frames); // tail frame: assume one more step
+    outF.push({
+      ...frames[i],
+      durationUs: Math.max(1, nextTs - frames[i].timestampUs),
+    });
+    outP.push(prints[i]);
+  }
   return { frames: outF, prints: outP };
+}
+
+/** Median raw capture step in µs — used to give the final frame a duration. */
+function medianFrameStep(frames: Frame[]): number {
+  if (frames.length < 2) return 33_333; // ~30fps guess
+  const steps: number[] = [];
+  for (let i = 1; i < frames.length; i++) {
+    const d = frames[i].timestampUs - frames[i - 1].timestampUs;
+    if (d > 0) steps.push(d);
+  }
+  if (steps.length === 0) return 33_333;
+  steps.sort((a, b) => a - b);
+  return steps[steps.length >> 1];
 }
 
 /**

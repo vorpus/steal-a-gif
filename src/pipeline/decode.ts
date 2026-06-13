@@ -47,6 +47,11 @@ async function decodeViaVideoElement(
     );
   }
 
+  // rVFC only fires for frames the compositor actually presents, so at 1x a
+  // slow `createImageBitmap` makes us miss source frames. Playing slower gives
+  // the capture loop time to grab every frame; `mediaTime` is source-relative
+  // so the timestamps (and thus durations) stay correct regardless of rate.
+  video.playbackRate = 0.5;
   await video.play();
 
   await new Promise<void>((resolve) => {

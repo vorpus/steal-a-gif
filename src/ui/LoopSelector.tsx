@@ -71,13 +71,28 @@ export function LoopSelector({
     const ctx = canvas.getContext("2d")!;
 
     const len = Math.max(1, value.end - value.start);
-    const frameDur = 1000 / Math.max(1, fps);
+    const fallback = 1000 / Math.max(1, fps);
+    // Cumulative timeline from each frame's real duration, so the preview plays
+    // at the same (possibly variable) speed as the exported GIF.
+    const durs: number[] = [];
+    let total = 0;
+    for (let i = 0; i < len; i++) {
+      const f = frames[value.start + i];
+      const ms = Math.max(20, f?.durationUs ? f.durationUs / 1000 : fallback);
+      durs.push(ms);
+      total += ms;
+    }
     let raf = 0;
     let startT = -1;
 
     const tick = (t: number) => {
       if (startT < 0) startT = t;
-      const k = Math.floor((t - startT) / frameDur) % len;
+      let into = (t - startT) % total;
+      let k = 0;
+      while (k < len - 1 && into >= durs[k]) {
+        into -= durs[k];
+        k++;
+      }
       const frame = frames[value.start + k];
       if (frame) {
         ctx.clearRect(0, 0, w, h);
@@ -133,6 +148,12 @@ export function LoopSelector({
   const leftPct = (value.start / n) * 100;
   const rightPct = (value.end / n) * 100;
 
+  let selMs = 0;
+  for (let i = value.start; i < value.end; i++) {
+    const f = frames[i];
+    selMs += f?.durationUs ? f.durationUs / 1000 : 1000 / Math.max(1, fps);
+  }
+
   return (
     <div className="loopselector">
       <canvas ref={previewRef} className="looppreview" />
@@ -174,7 +195,7 @@ export function LoopSelector({
         </div>
         <div className="scrubmeta">
           frames {value.start}–{value.end} ({value.end - value.start} ·{" "}
-          {((value.end - value.start) / Math.max(1, fps)).toFixed(2)}s)
+          {(selMs / 1000).toFixed(2)}s · {Math.round(1000 / (selMs / Math.max(1, value.end - value.start)))} fps)
         </div>
       </div>
     </div>

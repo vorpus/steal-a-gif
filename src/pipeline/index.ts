@@ -100,18 +100,29 @@ export async function renderGifs(
     base = base.map((f) => keyFlatBackground(f, bg));
   }
 
+  // Real per-frame on-screen time (ms) from the recording, so the GIF keeps
+  // the source cadence instead of a single guessed fps.
+  const fallbackMs = 1000 / opts.fps;
+  const delaysMs = looped.map((f) =>
+    f.durationUs ? f.durationUs / 1000 : fallbackMs,
+  );
+
   onStage?.("encode");
   const outputs: SizedResult[] = [];
   for (const size of opts.sizes) {
     const sized = size.maxEdge
       ? base.map((f) => downscaleImageData(f, size.maxEdge!))
       : base;
-    const gif = await encodeGif(sized, {
-      maxEdge: size.maxEdge,
-      fps: opts.fps,
-      removeBackground: opts.removeBackground,
-      maxBytes: size.maxBytes,
-    });
+    const gif = await encodeGif(
+      sized,
+      {
+        maxEdge: size.maxEdge,
+        fps: opts.fps,
+        removeBackground: opts.removeBackground,
+        maxBytes: size.maxBytes,
+      },
+      delaysMs,
+    );
     outputs.push({ label: size.label, gif, bytes: gif.size });
   }
 

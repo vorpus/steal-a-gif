@@ -12,6 +12,8 @@ import type { ExportOptions } from "./types";
 export async function encodeGif(
   frames: ImageData[],
   opts: ExportOptions,
+  /** Per-frame on-screen time in ms (preferred over a global fps). */
+  delaysMs?: number[],
 ): Promise<Blob> {
   let working = frames;
   let paletteColors = 256;
@@ -20,8 +22,14 @@ export async function encodeGif(
   // onto it disappear — frames must stay fully opaque.
   const transparent = opts.removeBackground;
 
+  // GIF delays are centiseconds; renderers clamp anything under ~2cs (20ms) to
+  // a slow default, so floor each delay there to keep playback predictable.
+  const delays = frames.map((_, i) =>
+    Math.max(20, Math.round(delaysMs?.[i] ?? 1000 / opts.fps)),
+  );
+
   for (let attempt = 0; attempt < 8; attempt++) {
-    const bytes = encodeOnce(working, opts.fps, paletteColors, transparent);
+    const bytes = encodeOnce(working, delays, paletteColors, transparent);
     if (!opts.maxBytes || bytes.length <= opts.maxBytes) {
       return new Blob([bytes], { type: "image/gif" });
     }
@@ -34,19 +42,19 @@ export async function encodeGif(
   }
 
   // Give back the smallest attempt even if it still exceeds the ceiling.
-  const bytes = encodeOnce(working, opts.fps, paletteColors, transparent);
+  const bytes = encodeOnce(working, delays, paletteColors, transparent);
   return new Blob([bytes], { type: "image/gif" });
 }
 
 function encodeOnce(
   frames: ImageData[],
-  fps: number,
+  delays: number[],
   maxColors: number,
   transparent: boolean,
 ): Uint8Array<ArrayBuffer> {
   const gif = GIFEncoder();
-  const delay = Math.round(1000 / fps);
-  for (const frame of frames) {
+  frames.forEach((frame, i) => {
+    const delay = delays[i];
     // With transparency, oneBitAlpha reserves palette index 0 for fully-
     // transparent pixels so GIF 1-bit transparency keys on our alpha channel.
     // Without it, encode opaque in rgb565 for better color and no stray holes.
@@ -64,7 +72,7 @@ function encodeOnce(
         ? { palette, delay, transparent: true, transparentIndex: 0 }
         : { palette, delay },
     );
-  }
+  });
   gif.finish();
   // Copy into a plain ArrayBuffer-backed view so it's a valid BlobPart.
   const src = gif.bytes();
