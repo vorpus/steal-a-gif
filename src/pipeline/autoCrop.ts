@@ -14,10 +14,20 @@ import type { Frame, Rect } from "./types";
 export async function autoCrop(
   frames: Frame[],
   roughCrop: Rect,
-  opts: { threshold?: number; padding?: number; sampleStride?: number } = {},
+  opts: {
+    threshold?: number;
+    padding?: number;
+    sampleStride?: number;
+    minAreaFrac?: number;
+  } = {},
 ): Promise<Rect> {
-  const threshold = opts.threshold ?? 0.02; // normalized variance
+  const threshold = opts.threshold ?? 0.01; // normalized variance
   const padding = opts.padding ?? 2;
+  // If the moving region collapses below this fraction of the user's box, the
+  // threshold caught only the busiest object (e.g. a bobbing character) and
+  // dropped quieter parts of the sticker. Keep the user's box rather than
+  // cropping to a misleading fragment.
+  const minAreaFrac = opts.minAreaFrac ?? 0.15;
   const stride = opts.sampleStride ?? Math.max(1, Math.floor(frames.length / 24));
 
   const w = Math.round(roughCrop.width);
@@ -74,6 +84,10 @@ export async function autoCrop(
 
   // No motion detected → fall back to the user's rectangle unchanged.
   if (maxX < minX || maxY < minY) return roughCrop;
+
+  // Motion box collapsed onto a fragment → trust the user's box instead.
+  const boxFrac = ((maxX - minX + 1) * (maxY - minY + 1)) / (w * h);
+  if (boxFrac < minAreaFrac) return roughCrop;
 
   minX = Math.max(0, minX - padding);
   minY = Math.max(0, minY - padding);

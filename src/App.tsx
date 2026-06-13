@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import {
-  extractGif,
+  extractGifs,
   SLACK_EMOJI_BYTES,
   SLACK_EMOJI_EDGE,
   type Rect,
@@ -39,26 +39,20 @@ export function App() {
     setError(null);
     setOutputs([]);
     try {
-      // Native-size export.
-      const full = await extractGif(
-        file,
-        crop,
-        { maxEdge: null, fps: 0, removeBackground: removeBg, maxBytes: null },
-        (s, d) => {
-          setStage(s);
-          setStageDetail(d ?? "");
-        },
-      );
-
-      // Slack-sized export (128px, <=128KB).
-      const slack = await extractGif(
+      // Decode once; derive both sizes from the same loop + crop + matte.
+      const res = await extractGifs(
         file,
         crop,
         {
-          maxEdge: SLACK_EMOJI_EDGE,
-          fps: full.fps,
           removeBackground: removeBg,
-          maxBytes: SLACK_EMOJI_BYTES,
+          sizes: [
+            { label: "original", maxEdge: null, maxBytes: null },
+            {
+              label: "slack",
+              maxEdge: SLACK_EMOJI_EDGE,
+              maxBytes: SLACK_EMOJI_BYTES,
+            },
+          ],
         },
         (s, d) => {
           setStage(s);
@@ -66,18 +60,15 @@ export function App() {
         },
       );
 
-      const next: Output[] = [
-        {
-          label: `Original (${full.finalCrop.width}×${full.finalCrop.height}, ${full.frameCount} frames)`,
-          url: URL.createObjectURL(full.gif),
-          bytes: full.gif.size,
-        },
-        {
-          label: "Slack emoji (128px)",
-          url: URL.createObjectURL(slack.gif),
-          bytes: slack.gif.size,
-        },
-      ];
+      const labels: Record<string, string> = {
+        original: `Original (${res.finalCrop.width}×${res.finalCrop.height}, ${res.frameCount} frames)`,
+        slack: "Slack emoji (128px)",
+      };
+      const next: Output[] = res.outputs.map((o) => ({
+        label: labels[o.label] ?? o.label,
+        url: URL.createObjectURL(o.gif),
+        bytes: o.bytes,
+      }));
       outputsRef.current = next;
       setOutputs(next);
       setStage("done");

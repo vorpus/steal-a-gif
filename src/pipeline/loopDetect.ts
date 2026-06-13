@@ -1,40 +1,79 @@
 import type { Frame, LoopRange, Rect } from "./types";
 
+const FP_SIZE = 16;
+
 /**
- * Find the loop in a screen recording of a looping animation.
- *
- * A screen capture of a looping GIF contains N full cycles plus partial
- * cycles at the head and tail, often with junk frames (a finger lifting off,
- * the share sheet animating away). We want exactly one clean cycle.
- *
- * Approach:
- *   1. Reduce every frame to a small grayscale "fingerprint" (default 16x16)
- *      inside the user's crop rect, so comparison is cheap and noise-tolerant.
- *   2. For each candidate period p, measure how well frame[i] matches
- *      frame[i+p] across the clip. A true loop period minimizes this
- *      "wrap-around" error — it's autocorrelation on frame fingerprints.
- *   3. Pick the best period, then choose the start offset whose seam
- *      (last-frame -> first-frame transition) is smoothest.
+ * Reduce every frame to a small grayscale fingerprint inside the crop rect, so
+ * all the comparison math downstream is cheap and noise-tolerant.
  */
-export async function detectLoop(
+export async function fingerprintFrames(
   frames: Frame[],
   crop: Rect,
-  opts: { fingerprintSize?: number; minPeriod?: number } = {},
-): Promise<LoopRange> {
-  const fpSize = opts.fingerprintSize ?? 16;
-  const minPeriod = opts.minPeriod ?? 4;
+  size = FP_SIZE,
+): Promise<Float32Array[]> {
+  return Promise.all(frames.map((f) => fingerprint(f.bitmap, crop, size)));
+}
+
+/**
+ * Collapse runs of near-identical frames.
+ *
+ * A screen recording captures at the device rate (often 60fps) while the GIF
+ * plays much slower (~10fps), so each animation frame is captured several
+ * times in a row. Those duplicates wreck loop detection — adjacent identical
+ * frames look like a perfect 1-frame loop. Dropping them recovers the GIF's
+ * actual frame sequence (and its real cadence, via the kept timestamps).
+ */
+export function dedupeFrames(
+  frames: Frame[],
+  prints: Float32Array[],
+  opts: { epsilon?: number } = {},
+): { frames: Frame[]; prints: Float32Array[] } {
+  const eps = opts.epsilon ?? 0.004; // mean per-pixel delta below this == dup
+  if (frames.length === 0) return { frames, prints };
+  const outF: Frame[] = [frames[0]];
+  const outP: Float32Array[] = [prints[0]];
+  for (let i = 1; i < frames.length; i++) {
+    if (l1(prints[i], outP[outP.length - 1]) > eps) {
+      outF.push(frames[i]);
+      outP.push(prints[i]);
+    }
+  }
+  return { frames: outF, prints: outP };
+}
+
+/**
+ * Find the loop in the (deduped) frame sequence.
+ *
+ * For each candidate period p we measure two things over the clip:
+ *   E(p) = how well frame[i] matches frame[i+p]  (low == it really repeats)
+ *   D(p) = how much the window [0,p) varies from its first frame
+ *          (high == the window covers the *whole* animation, not a fragment)
+ *
+ * We maximize `D(p) - k*E(p)`: a real loop both repeats cleanly AND spans the
+ * full motion. This is what stops the search collapsing onto a tiny period of
+ * nearly-static frames. Scanning ascending with strict improvement means that
+ * when the true period and its multiples tie, we keep the shortest.
+ */
+export function detectLoop(
+  frames: Frame[],
+  prints: Float32Array[],
+  opts: { minPeriod?: number; seamWeight?: number } = {},
+): LoopRange {
+  const minPeriod = opts.minPeriod ?? 2;
+  const k = opts.seamWeight ?? 3;
   const n = frames.length;
   if (n < minPeriod * 2) {
-    return { startIndex: 0, endIndex: n, fps: estimateFps(frames), seamError: Infinity };
+    return {
+      startIndex: 0,
+      endIndex: n,
+      fps: estimateFps(frames),
+      seamError: Infinity,
+    };
   }
-
-  const prints = await Promise.all(
-    frames.map((f) => fingerprint(f.bitmap, crop, fpSize)),
-  );
 
   const maxPeriod = Math.floor(n / 2);
   let bestPeriod = minPeriod;
-  let bestPeriodError = Infinity;
+  let bestScore = -Infinity;
 
   for (let p = minPeriod; p <= maxPeriod; p++) {
     let err = 0;
@@ -43,16 +82,20 @@ export async function detectLoop(
       err += l1(prints[i], prints[i + p]);
       count++;
     }
-    // Normalize so longer periods (fewer comparisons) aren't unfairly favored.
-    const meanErr = err / count;
-    if (meanErr < bestPeriodError) {
-      bestPeriodError = meanErr;
+    const E = err / count;
+
+    let D = 0;
+    for (let i = 1; i < p; i++) D = Math.max(D, l1(prints[i], prints[0]));
+
+    const score = D - k * E;
+    if (score > bestScore + 1e-6) {
+      bestScore = score;
       bestPeriod = p;
     }
   }
 
-  // With the period fixed, slide a window of length `bestPeriod` and pick the
-  // start whose seam frame[start+period-1] -> frame[start] is cleanest.
+  // With the period fixed, slide a window and pick the start whose seam
+  // (last frame -> first frame) is smoothest, so the GIF loops without a jump.
   let bestStart = 0;
   let bestSeam = Infinity;
   for (let start = 0; start + bestPeriod < n; start++) {
@@ -71,7 +114,6 @@ export async function detectLoop(
   };
 }
 
-/** Downsample a crop region to an SxS grayscale Float32 fingerprint in [0,1]. */
 async function fingerprint(
   bitmap: ImageBitmap,
   crop: Rect,
@@ -93,10 +135,11 @@ async function fingerprint(
   const { data } = ctx.getImageData(0, 0, size, size);
   const out = new Float32Array(size * size);
   for (let i = 0; i < out.length; i++) {
-    const r = data[i * 4];
-    const g = data[i * 4 + 1];
-    const b = data[i * 4 + 2];
-    out[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    out[i] =
+      (0.299 * data[i * 4] +
+        0.587 * data[i * 4 + 1] +
+        0.114 * data[i * 4 + 2]) /
+      255;
   }
   return out;
 }
@@ -107,9 +150,15 @@ function l1(a: Float32Array, b: Float32Array): number {
   return sum / a.length;
 }
 
+/** Median inter-frame delta of the (deduped) frames -> source animation fps. */
 function estimateFps(frames: Frame[]): number {
-  if (frames.length < 2) return 30;
-  const span = frames[frames.length - 1].timestampUs - frames[0].timestampUs;
-  if (span <= 0) return 30;
-  return ((frames.length - 1) / span) * 1e6;
+  if (frames.length < 2) return 12;
+  const deltas: number[] = [];
+  for (let i = 1; i < frames.length; i++) {
+    deltas.push(frames[i].timestampUs - frames[i - 1].timestampUs);
+  }
+  deltas.sort((a, b) => a - b);
+  const median = deltas[deltas.length >> 1];
+  if (median <= 0) return 12;
+  return 1e6 / median;
 }
