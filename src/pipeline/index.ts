@@ -114,12 +114,12 @@ export async function renderGifs(
   let looped: Frame[];
   if (accurate.length >= 1) {
     // Collapse ONLY held duplicates (a 60fps capture repeats each ~10fps source
-    // frame many times). This biases hard toward keeping frames: it counts how
-    // many pixels actually changed rather than averaging the whole frame, so
-    // genuinely-distinct animation frames are never dropped — that average was
-    // the old "missing frames" bug. Each kept frame gets its real on-screen
+    // frame many times), comparing within the CROP region — the animation —
+    // not the whole frame. Comparing the whole frame lets the large static app
+    // background dilute the sticker's motion, merging genuinely-distinct frames
+    // (the "missing frames" bug). Each kept frame keeps its real on-screen
     // duration; the last spans to the window end so loop timing is exact.
-    looped = await collapseHeldDuplicates(accurate, t1Us);
+    looped = await collapseHeldDuplicates(accurate, t1Us, crop);
     console.info(
       `[steal-a-gif] window ${(t0Us / 1e3).toFixed(0)}–${(t1Us / 1e3).toFixed(0)}ms · ${accurate.length} decoded → ${looped.length} distinct frames`,
     );
@@ -184,12 +184,13 @@ export async function renderGifs(
 async function collapseHeldDuplicates(
   frames: Frame[],
   t1Us: number,
+  crop: Rect,
 ): Promise<Frame[]> {
   const SIZE = 32; // fingerprint grid
   const NOISE = 0.05; // per-pixel change below this (~13/255) is encoder noise
-  const KEEP_FRACTION = 0.001; // changed-pixel fraction above this => distinct
+  const KEEP_FRACTION = 0.002; // changed-pixel fraction above this => distinct
 
-  const prints = frames.map((f) => grayFingerprint(f.bitmap, SIZE));
+  const prints = frames.map((f) => grayFingerprint(f.bitmap, crop, SIZE));
   const keptIdx: number[] = [0];
   for (let i = 1; i < frames.length; i++) {
     const ref = prints[keptIdx[keptIdx.length - 1]];
@@ -211,10 +212,26 @@ async function collapseHeldDuplicates(
   });
 }
 
-function grayFingerprint(bitmap: ImageBitmap, size: number): Float32Array {
+function grayFingerprint(
+  bitmap: ImageBitmap,
+  crop: Rect,
+  size: number,
+): Float32Array {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0, size, size);
+  // Sample the crop region (the animation), scaled to fill the grid, so motion
+  // isn't diluted by static background outside the selection.
+  ctx.drawImage(
+    bitmap,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    size,
+    size,
+  );
   const { data } = ctx.getImageData(0, 0, size, size);
   const out = new Float32Array(size * size);
   for (let i = 0; i < out.length; i++) {
