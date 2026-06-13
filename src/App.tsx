@@ -24,7 +24,7 @@ export function App() {
   const [range, setRange] = useState<LoopRange | null>(null);
   const [removeBg, setRemoveBg] = useState(true);
   const [autoTighten, setAutoTighten] = useState(false);
-  const [square, setSquare] = useState(false);
+  const [square, setSquare] = useState(true);
   const [stage, setStage] = useState<Stage | null>(null);
   const [stageDetail, setStageDetail] = useState("");
   const [outputs, setOutputs] = useState<Output[]>([]);

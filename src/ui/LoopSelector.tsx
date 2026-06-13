@@ -120,6 +120,37 @@ export function LoopSelector({
     return Math.min(n, Math.max(0, Math.round(frac * n)));
   };
 
+  // Drag inside the selected band to pan the whole range (keep its length).
+  const startMove = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = wrapRef.current!.getBoundingClientRect();
+    const orig = { start: value.start, end: value.end };
+    const len = orig.end - orig.start;
+    const fracIdx = (cx: number) => ((cx - rect.left) / rect.width) * n;
+    const startIdx = fracIdx(e.clientX);
+    const move = (ev: PointerEvent) => {
+      const delta = Math.round(fracIdx(ev.clientX) - startIdx);
+      let s = orig.start + delta;
+      let en = orig.end + delta;
+      if (s < 0) {
+        s = 0;
+        en = len;
+      }
+      if (en > n) {
+        en = n;
+        s = n - len;
+      }
+      onChange({ start: s, end: en });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const startDrag =
     (which: "start" | "end") => (e: React.PointerEvent) => {
       e.preventDefault();
@@ -181,6 +212,11 @@ export function LoopSelector({
           <div
             className="dim"
             style={{ left: `${rightPct}%`, right: 0 }}
+          />
+          <div
+            className="selection"
+            style={{ left: `${leftPct}%`, width: `${rightPct - leftPct}%` }}
+            onPointerDown={startMove}
           />
           <div
             className="handle"

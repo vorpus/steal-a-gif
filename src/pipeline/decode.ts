@@ -256,22 +256,33 @@ async function demux(file: File): Promise<Demuxed> {
   const buf = await file.arrayBuffer();
   const mp4 = createFile();
 
-  const info = await new Promise<Movie>((resolve, reject) => {
-    mp4.onError = (mod, msg) => reject(new Error(`mp4box ${mod}: ${msg}`));
-    mp4.onReady = resolve;
-    mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buf, 0));
-    mp4.flush();
-  });
+  // Extraction must be enabled and start()ed BEFORE the final flush() — flush
+  // is what emits the buffered samples. (Doing flush first yields zero
+  // samples.) The whole file is appended at once, so onReady fires during
+  // appendBuffer and we set everything up there, then flush to drain.
+  const { track, raw } = await new Promise<{ track: Movie["videoTracks"][number]; raw: Sample[] }>(
+    (resolve, reject) => {
+      const collected: Sample[] = [];
+      mp4.onError = (mod, msg) => reject(new Error(`mp4box ${mod}: ${msg}`));
+      mp4.onSamples = (_id, _user, s) => collected.push(...s);
+      mp4.onReady = (info) => {
+        const t = info.videoTracks?.[0];
+        if (!t) {
+          reject(new Error("No video track in file"));
+          return;
+        }
+        mp4.setExtractionOptions(t.id, undefined, {
+          nbSamples: Number.POSITIVE_INFINITY,
+        });
+        mp4.start();
+        mp4.flush();
+        resolve({ track: t, raw: collected });
+      };
+      mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buf, 0));
+      mp4.flush();
+    },
+  );
 
-  const track = info.videoTracks?.[0];
-  if (!track) throw new Error("No video track in file");
-
-  const raw: Sample[] = [];
-  mp4.onSamples = (_id, _user, s) => raw.push(...s);
-  mp4.setExtractionOptions(track.id, undefined, {
-    nbSamples: Number.POSITIVE_INFINITY,
-  });
-  mp4.start();
   if (raw.length === 0) throw new Error("No samples extracted");
 
   const samples: DemuxSample[] = raw.map((s) => ({

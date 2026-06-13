@@ -250,6 +250,16 @@ body {
   background: rgba(8, 9, 13, 0.68);
   pointer-events: none;
 }
+.selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: grab;
+  touch-action: none;
+}
+.selection:active {
+  cursor: grabbing;
+}
 .handle {
   position: absolute;
   top: -3px;
