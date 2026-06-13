@@ -1,7 +1,7 @@
 import { decodeFrames } from "./decode";
 import { detectLoop } from "./loopDetect";
 import { autoCrop } from "./autoCrop";
-import { removeBackgroundBatch } from "./removeBackground";
+import { estimateBackgroundColor, keyFlatBackground } from "./bgKey";
 import { encodeGif } from "./encodeGif";
 import type { ExportOptions, Frame, Rect } from "./types";
 
@@ -43,17 +43,17 @@ export async function extractGif(
   const fps = exportOpts.fps || loop.fps;
   const rendered = renderFrames(looped, tight, exportOpts.maxEdge);
 
-  let imageDatas: ImageData[];
+  let imageDatas = rendered.canvases.map((c) =>
+    c.getContext("2d")!.getImageData(0, 0, c.width, c.height),
+  );
+
   if (exportOpts.removeBackground) {
     onStage?.("background");
-    const blobs = await removeBackgroundBatch(rendered.canvases, 2, (d, t) =>
-      onStage?.("background", `${d}/${t}`),
-    );
-    imageDatas = await Promise.all(blobs.map(blobToImageData));
-  } else {
-    imageDatas = rendered.canvases.map((c) =>
-      c.getContext("2d")!.getImageData(0, 0, c.width, c.height),
-    );
+    // Estimate the flat app background once (it's constant across frames) and
+    // flood-fill it out of each frame — see bgKey.ts for why this beats AI
+    // matting on sticker captures.
+    const bg = estimateBackgroundColor(imageDatas[0]);
+    imageDatas = imageDatas.map((f) => keyFlatBackground(f, bg));
   }
 
   onStage?.("encode");
@@ -92,14 +92,6 @@ function renderFrames(
     return c;
   });
   return { canvases };
-}
-
-async function blobToImageData(blob: Blob): Promise<ImageData> {
-  const bitmap = await createImageBitmap(blob);
-  const c = new OffscreenCanvas(bitmap.width, bitmap.height);
-  const ctx = c.getContext("2d")!;
-  ctx.drawImage(bitmap, 0, 0);
-  return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
 }
 
 export * from "./types";

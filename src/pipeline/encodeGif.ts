@@ -42,12 +42,19 @@ function encodeOnce(
   const gif = GIFEncoder();
   const delay = Math.round(1000 / fps);
   for (const frame of frames) {
-    const palette = quantize(frame.data, maxColors, { format: "rgba4444" });
+    // oneBitAlpha makes quantize reserve palette index 0 for fully-transparent
+    // pixels and map alpha<128 there, so GIF's 1-bit transparency keys on our
+    // actual alpha channel instead of an arbitrary opaque color.
+    const palette = quantize(frame.data, maxColors, {
+      format: "rgba4444",
+      oneBitAlpha: true,
+    });
     const index = applyPalette(frame.data, palette, "rgba4444");
     gif.writeFrame(index, frame.width, frame.height, {
       palette,
       delay,
       transparent: true,
+      transparentIndex: 0,
     });
   }
   gif.finish();

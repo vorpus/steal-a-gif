@@ -21,30 +21,21 @@ export async function removeFrameBackground(
   });
 }
 
-/** Apply the matte produced for the first frame is NOT valid across frames;
- * background removal must run per frame. This helper batches with a small
- * concurrency limit so we don't blow up GPU memory on long loops. */
+/**
+ * Background removal must run per frame (a first-frame matte isn't valid for
+ * later frames). @imgly/background-removal holds a single global onnxruntime
+ * session, so calls MUST be serialized — running two concurrently throws
+ * "Session already started". We process strictly one at a time.
+ */
 export async function removeBackgroundBatch(
   frames: (OffscreenCanvas | HTMLCanvasElement)[],
-  concurrency = 2,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Blob[]> {
   const out: Blob[] = new Array(frames.length);
-  let next = 0;
-  let done = 0;
-
-  async function worker(): Promise<void> {
-    while (next < frames.length) {
-      const i = next++;
-      out[i] = await removeFrameBackground(frames[i]);
-      done++;
-      onProgress?.(done, frames.length);
-    }
+  for (let i = 0; i < frames.length; i++) {
+    out[i] = await removeFrameBackground(frames[i]);
+    onProgress?.(i + 1, frames.length);
   }
-
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, frames.length) }, worker),
-  );
   return out;
 }
 

@@ -20,7 +20,7 @@ one clean cycle
    │  autoCrop.ts      per-pixel motion map → tight bounding box of the animation
    ▼
 tight crop
-   │  removeBackground.ts   (optional) @imgly/background-removal, ISNet on WebGPU
+   │  bgKey.ts          (optional) flood-fill the flat app background from the edges
    ▼
 matted frames
    │  encodeGif.ts     gifenc, with a "fit to N bytes" loop for Slack's 128KB cap
@@ -39,6 +39,14 @@ GIF  (native size + 128px Slack emoji)
   chrome doesn't change between frames but the animation does. We take the
   per-pixel variance across the loop and bound the moving region. This both
   removes dead background and finds the GIF's true size.
+- **Background removal** (`src/pipeline/bgKey.ts`) — sticker apps draw on a
+  flat, connected background color. Rather than AI matting (which does salient-
+  object detection and routinely drops a stylized character while keeping a
+  high-contrast prop), we flood-fill the background inward from the frame
+  border. It only removes pixels connected to the edge, so an interior outline
+  that's close in color to the background never gets eaten, and the constant
+  seed color means no per-frame flicker. AI matting (`removeBackground.ts`,
+  @imgly ISNet) is kept for the harder case of non-flat backgrounds (TikTok).
 - **Size budget** (`src/pipeline/encodeGif.ts`) — GIF's 256-color palette and
   Slack's 128KB ceiling are the real constraints. The encoder shrinks palette,
   then resolution, until it fits.
@@ -53,10 +61,9 @@ npm run dev
 Open the printed URL, choose a screen recording, drag a box around the
 animation, and hit **Make GIF**.
 
-> The dev server sends COOP/COEP headers (see `vite.config.ts`) so we stay in a
-> cross-origin-isolated context for WebCodecs + onnxruntime-web. Background
-> removal needs a WebGPU-capable browser (Chrome/Edge 113+); without it the app
-> still works for crop + loop + encode.
+> The default background removal (flood-fill) is pure JS/canvas and needs no
+> GPU or model download. The optional AI matting path needs a WebGPU-capable
+> browser (Chrome/Edge 113+).
 
 ## Status / roadmap
 
