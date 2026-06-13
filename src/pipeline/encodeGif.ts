@@ -15,9 +15,13 @@ export async function encodeGif(
 ): Promise<Blob> {
   let working = frames;
   let paletteColors = 256;
+  // Only key transparency when the background was actually removed. Otherwise
+  // reserving a transparent palette index makes opaque pixels that quantize
+  // onto it disappear — frames must stay fully opaque.
+  const transparent = opts.removeBackground;
 
   for (let attempt = 0; attempt < 8; attempt++) {
-    const bytes = encodeOnce(working, opts.fps, paletteColors);
+    const bytes = encodeOnce(working, opts.fps, paletteColors, transparent);
     if (!opts.maxBytes || bytes.length <= opts.maxBytes) {
       return new Blob([bytes], { type: "image/gif" });
     }
@@ -30,7 +34,7 @@ export async function encodeGif(
   }
 
   // Give back the smallest attempt even if it still exceeds the ceiling.
-  const bytes = encodeOnce(working, opts.fps, paletteColors);
+  const bytes = encodeOnce(working, opts.fps, paletteColors, transparent);
   return new Blob([bytes], { type: "image/gif" });
 }
 
@@ -38,24 +42,28 @@ function encodeOnce(
   frames: ImageData[],
   fps: number,
   maxColors: number,
+  transparent: boolean,
 ): Uint8Array<ArrayBuffer> {
   const gif = GIFEncoder();
   const delay = Math.round(1000 / fps);
   for (const frame of frames) {
-    // oneBitAlpha makes quantize reserve palette index 0 for fully-transparent
-    // pixels and map alpha<128 there, so GIF's 1-bit transparency keys on our
-    // actual alpha channel instead of an arbitrary opaque color.
+    // With transparency, oneBitAlpha reserves palette index 0 for fully-
+    // transparent pixels so GIF 1-bit transparency keys on our alpha channel.
+    // Without it, encode opaque in rgb565 for better color and no stray holes.
+    const format = transparent ? "rgba4444" : "rgb565";
     const palette = quantize(frame.data, maxColors, {
-      format: "rgba4444",
-      oneBitAlpha: true,
+      format,
+      oneBitAlpha: transparent,
     });
-    const index = applyPalette(frame.data, palette, "rgba4444");
-    gif.writeFrame(index, frame.width, frame.height, {
-      palette,
-      delay,
-      transparent: true,
-      transparentIndex: 0,
-    });
+    const index = applyPalette(frame.data, palette, format);
+    gif.writeFrame(
+      index,
+      frame.width,
+      frame.height,
+      transparent
+        ? { palette, delay, transparent: true, transparentIndex: 0 }
+        : { palette, delay },
+    );
   }
   gif.finish();
   // Copy into a plain ArrayBuffer-backed view so it's a valid BlobPart.

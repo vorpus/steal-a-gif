@@ -23,7 +23,8 @@ export function App() {
   const [crop, setCrop] = useState<Rect | null>(null);
   const [range, setRange] = useState<LoopRange | null>(null);
   const [removeBg, setRemoveBg] = useState(true);
-  const [autoTighten, setAutoTighten] = useState(true);
+  const [autoTighten, setAutoTighten] = useState(false);
+  const [square, setSquare] = useState(false);
   const [stage, setStage] = useState<Stage | null>(null);
   const [stageDetail, setStageDetail] = useState("");
   const [outputs, setOutputs] = useState<Output[]>([]);
@@ -127,7 +128,32 @@ export function App() {
       {prep && crop && (
         <section className="step">
           <h2>1 · Box the animation</h2>
-          <CropCanvas bitmap={prep.frames[0].bitmap} value={crop} onCrop={setCrop} />
+          <label className="inlinecheck">
+            <input
+              type="checkbox"
+              checked={square}
+              onChange={(e) => {
+                setSquare(e.target.checked);
+                // Snap the current box to a centered square on enable.
+                if (e.target.checked && crop) {
+                  const side = Math.min(crop.width, crop.height);
+                  setCrop({
+                    x: crop.x + (crop.width - side) / 2,
+                    y: crop.y + (crop.height - side) / 2,
+                    width: side,
+                    height: side,
+                  });
+                }
+              }}
+            />
+            Lock to square
+          </label>
+          <CropCanvas
+            bitmap={prep.frames[0].bitmap}
+            value={crop}
+            square={square}
+            onCrop={setCrop}
+          />
         </section>
       )}
 
