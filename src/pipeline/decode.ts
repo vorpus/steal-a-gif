@@ -3,153 +3,53 @@ import type { Movie, Sample } from "mp4box";
 import type { Frame } from "./types";
 
 /**
- * Decode a video file into frames.
+ * Decoding has two modes:
  *
- * Preferred path: WebCodecs `VideoDecoder`, fed encoded chunks demuxed by
- * mp4box. This decodes *every* coded frame deterministically — no frames lost
- * to real-time playback the way the `<video>` + rVFC fallback drops them.
+ *  - PREVIEW (`decodeForPreview`): play the clip and grab frames via
+ *    requestVideoFrameCallback. Fast and universal (uses the browser's native
+ *    decode, so HEVC works), but drops frames under load. That's fine — it
+ *    only drives the scrubber and loop preview.
  *
- * Fallback: a `<video>` element + `requestVideoFrameCallback`, used when
- * WebCodecs is unavailable, the container isn't MP4/MOV, or the codec isn't
- * decodable in this browser (e.g. HEVC without hardware support).
+ *  - ACCURATE (`extractAccurateRange`): for the trimmed range only, get every
+ *    frame with correct timing. Tries WebCodecs (fast, H.264). When the codec
+ *    isn't WebCodecs-decodable (e.g. HEVC on most Chrome builds), it demuxes
+ *    the exact frame timestamps with mp4box and SEEKS the <video> to each one
+ *    — deterministic, no drops, and uses native HEVC decode.
  */
-export async function decodeFrames(
+
+interface DemuxSample {
+  /** Composition (presentation) time, µs. */
+  ctsUs: number;
+  /** Frame duration, µs. */
+  durUs: number;
+  isSync: boolean;
+  data: Uint8Array;
+}
+
+interface Demuxed {
+  config: VideoDecoderConfig;
+  /** Samples in DECODE order (as delivered) — required for VideoDecoder. */
+  samples: DemuxSample[];
+}
+
+// ---------------------------------------------------------------------------
+// Preview decode (fast, lossy, universal)
+// ---------------------------------------------------------------------------
+
+export async function decodeForPreview(
   file: File,
   opts: { maxFrames?: number } = {},
 ): Promise<Frame[]> {
   const maxFrames = opts.maxFrames ?? 900;
-
-  if (canTryWebCodecs(file)) {
-    try {
-      return await decodeViaWebCodecs(file, maxFrames);
-    } catch (e) {
-      console.warn("WebCodecs decode failed; falling back to <video>", e);
-    }
-  }
-
   const url = URL.createObjectURL(file);
   try {
-    return await decodeViaVideoElement(url, maxFrames);
+    return await captureByPlayback(url, maxFrames);
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
-function canTryWebCodecs(file: File): boolean {
-  if (typeof VideoDecoder === "undefined") return false;
-  return (
-    /(mp4|quicktime|m4v|x-m4v)/i.test(file.type) ||
-    /\.(mp4|mov|m4v)$/i.test(file.name)
-  );
-}
-
-async function decodeViaWebCodecs(
-  file: File,
-  maxFrames: number,
-): Promise<Frame[]> {
-  const buf = await file.arrayBuffer();
-  const mp4 = createFile();
-
-  // Demux: parse the container, then pull every sample (encoded frame).
-  const info = await new Promise<Movie>((resolve, reject) => {
-    mp4.onError = (mod, msg) => reject(new Error(`mp4box ${mod}: ${msg}`));
-    mp4.onReady = resolve;
-    mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buf, 0));
-    mp4.flush();
-  });
-
-  const track = info.videoTracks?.[0];
-  if (!track) throw new Error("No video track in file");
-
-  const samples: Sample[] = [];
-  mp4.onSamples = (_id, _user, s) => samples.push(...s);
-  mp4.setExtractionOptions(track.id, undefined, {
-    nbSamples: Number.POSITIVE_INFINITY,
-  });
-  mp4.start();
-  if (samples.length === 0) throw new Error("No samples extracted");
-
-  const config: VideoDecoderConfig = {
-    codec: track.codec,
-    codedWidth: track.video?.width ?? track.track_width,
-    codedHeight: track.video?.height ?? track.track_height,
-    description: codecDescription(samples[0]),
-  };
-  const support = await VideoDecoder.isConfigSupported(config).catch(() => ({
-    supported: false,
-  }));
-  if (!support.supported) {
-    throw new Error(`Codec not decodable here: ${track.codec}`);
-  }
-
-  const frames: Frame[] = [];
-  const pending: Promise<void>[] = [];
-  let stopped = false;
-
-  const decoder = new VideoDecoder({
-    output: (frame) => {
-      if (stopped || frames.length + pending.length >= maxFrames) {
-        frame.close();
-        return;
-      }
-      const timestampUs = frame.timestamp;
-      pending.push(
-        createImageBitmap(frame)
-          .then((bitmap) => {
-            frames.push({ bitmap, timestampUs });
-          })
-          .finally(() => frame.close()),
-      );
-    },
-    error: (e) => console.warn("VideoDecoder error", e),
-  });
-  decoder.configure(config);
-
-  for (const s of samples) {
-    if (frames.length + pending.length >= maxFrames) {
-      stopped = true;
-      break;
-    }
-    decoder.decode(
-      new EncodedVideoChunk({
-        type: s.is_sync ? "key" : "delta",
-        timestamp: (s.cts * 1e6) / s.timescale,
-        duration: (s.duration * 1e6) / s.timescale,
-        data: s.data!,
-      }),
-    );
-  }
-
-  await decoder.flush();
-  await Promise.all(pending);
-  decoder.close();
-
-  if (frames.length === 0) throw new Error("Decoded zero frames");
-  // Decoder emits in decode order; sort to presentation order by timestamp.
-  frames.sort((a, b) => a.timestampUs - b.timestampUs);
-  return frames;
-}
-
-/**
- * Pull the codec configuration record (avcC/hvcC/…) out of a sample's sample
- * entry and return it without the 8-byte box header — that's what
- * `VideoDecoder.configure({ description })` expects.
- */
-function codecDescription(sample: Sample): Uint8Array {
-  const entry = sample.description as {
-    avcC?: { write(s: DataStream): void };
-    hvcC?: { write(s: DataStream): void };
-    vpcC?: { write(s: DataStream): void };
-    av1C?: { write(s: DataStream): void };
-  };
-  const box = entry.avcC ?? entry.hvcC ?? entry.vpcC ?? entry.av1C;
-  if (!box) throw new Error("No codec description (avcC/hvcC) in sample entry");
-  const stream = new DataStream(); // big-endian, dynamic size
-  box.write(stream);
-  return new Uint8Array(stream.buffer, 8, stream.byteLength - 8);
-}
-
-async function decodeViaVideoElement(
+async function captureByPlayback(
   url: string,
   maxFrames: number,
 ): Promise<Frame[]> {
@@ -163,17 +63,13 @@ async function decodeViaVideoElement(
     video.onerror = () => reject(new Error("Failed to load video metadata"));
   });
 
-  const frames: Frame[] = [];
-
-  const hasRVFC = "requestVideoFrameCallback" in video;
-  if (!hasRVFC) {
-    throw new Error(
-      "requestVideoFrameCallback unsupported; WebCodecs path needed for this browser",
-    );
+  if (!("requestVideoFrameCallback" in video)) {
+    throw new Error("requestVideoFrameCallback unsupported in this browser");
   }
 
-  // Slower playback gives the capture loop time to grab every presented frame;
-  // mediaTime is source-relative so timestamps stay correct.
+  const frames: Frame[] = [];
+  // Slower playback lets the capture loop keep up; mediaTime is source-relative
+  // so timestamps stay correct regardless of rate.
   video.playbackRate = 0.5;
   await video.play();
 
@@ -188,16 +84,224 @@ async function decodeViaVideoElement(
       }
       const bitmap = await createImageBitmap(video);
       frames.push({ bitmap, timestampUs: Math.round(meta.mediaTime * 1e6) });
-      (video as HTMLVideoElement & {
-        requestVideoFrameCallback: (cb: typeof onFrame) => void;
-      }).requestVideoFrameCallback(onFrame);
+      rvfc(video, onFrame);
     };
-    (video as HTMLVideoElement & {
-      requestVideoFrameCallback: (cb: typeof onFrame) => void;
-    }).requestVideoFrameCallback(onFrame);
+    rvfc(video, onFrame);
     video.onended = () => resolve();
   });
 
   video.pause();
   return frames;
+}
+
+function rvfc(
+  video: HTMLVideoElement,
+  cb: (now: number, meta: { mediaTime: number }) => void,
+): void {
+  (
+    video as HTMLVideoElement & {
+      requestVideoFrameCallback: (c: typeof cb) => void;
+    }
+  ).requestVideoFrameCallback(cb);
+}
+
+// ---------------------------------------------------------------------------
+// Accurate range extraction (every frame, correct timing)
+// ---------------------------------------------------------------------------
+
+export async function extractAccurateRange(
+  file: File,
+  t0Us: number,
+  t1Us: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Frame[]> {
+  let demuxed: Demuxed;
+  try {
+    demuxed = await demux(file);
+  } catch (e) {
+    console.warn("demux failed; caller should fall back", e);
+    return [];
+  }
+
+  const { config, samples } = demuxed;
+  const picks = samples
+    .filter((s) => s.ctsUs >= t0Us && s.ctsUs < t1Us)
+    .sort((a, b) => a.ctsUs - b.ctsUs);
+  if (picks.length === 0) return [];
+
+  // Prefer WebCodecs when this browser can actually decode the codec.
+  if (typeof VideoDecoder !== "undefined") {
+    const support = await VideoDecoder.isConfigSupported(config).catch(() => ({
+      supported: false,
+    }));
+    if (support.supported) {
+      try {
+        return await decodeWindowWebCodecs(config, samples, t0Us, t1Us);
+      } catch (e) {
+        console.warn("WebCodecs window decode failed; seeking instead", e);
+      }
+    }
+  }
+
+  // Universal fallback: native decode via seeking (handles HEVC).
+  return await extractBySeek(file, picks, onProgress);
+}
+
+async function decodeWindowWebCodecs(
+  config: VideoDecoderConfig,
+  samples: DemuxSample[],
+  t0Us: number,
+  t1Us: number,
+): Promise<Frame[]> {
+  // Start at the last keyframe at/under t0 so inter-frames decode correctly;
+  // feed through the last sample presenting before t1.
+  let startIdx = 0;
+  let endIdx = 0;
+  for (let i = 0; i < samples.length; i++) {
+    if (samples[i].isSync && samples[i].ctsUs <= t0Us) startIdx = i;
+    if (samples[i].ctsUs < t1Us) endIdx = i;
+  }
+
+  const frames: Frame[] = [];
+  const pending: Promise<void>[] = [];
+  const decoder = new VideoDecoder({
+    output: (frame) => {
+      const ts = frame.timestamp;
+      if (ts >= t0Us && ts < t1Us) {
+        pending.push(
+          createImageBitmap(frame)
+            .then((bitmap) => {
+              frames.push({ bitmap, timestampUs: ts });
+            })
+            .finally(() => frame.close()),
+        );
+      } else {
+        frame.close();
+      }
+    },
+    error: (e) => console.warn("VideoDecoder error", e),
+  });
+  decoder.configure(config);
+
+  for (let i = startIdx; i <= endIdx; i++) {
+    const s = samples[i];
+    decoder.decode(
+      new EncodedVideoChunk({
+        type: s.isSync ? "key" : "delta",
+        timestamp: s.ctsUs,
+        duration: s.durUs,
+        data: s.data,
+      }),
+    );
+  }
+  await decoder.flush();
+  await Promise.all(pending);
+  decoder.close();
+
+  frames.sort((a, b) => a.timestampUs - b.timestampUs);
+  return frames;
+}
+
+async function extractBySeek(
+  file: File,
+  picks: DemuxSample[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<Frame[]> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.src = url;
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadeddata = () => resolve();
+      video.onerror = () => reject(new Error("Failed to load video for seek"));
+    });
+
+    const frames: Frame[] = [];
+    for (let i = 0; i < picks.length; i++) {
+      const s = picks[i];
+      // Seek to the middle of the frame's display interval so rounding can't
+      // land us on a neighbouring frame.
+      const tSec = (s.ctsUs + s.durUs / 2) / 1e6;
+      await seekTo(video, tSec);
+      const bitmap = await createImageBitmap(video);
+      frames.push({ bitmap, timestampUs: s.ctsUs });
+      onProgress?.(i + 1, picks.length);
+    }
+    return frames;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function seekTo(video: HTMLVideoElement, tSec: number): Promise<void> {
+  return new Promise((resolve) => {
+    const onSeeked = () => {
+      video.removeEventListener("seeked", onSeeked);
+      resolve();
+    };
+    video.addEventListener("seeked", onSeeked);
+    video.currentTime = tSec;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Demux (mp4box)
+// ---------------------------------------------------------------------------
+
+async function demux(file: File): Promise<Demuxed> {
+  const buf = await file.arrayBuffer();
+  const mp4 = createFile();
+
+  const info = await new Promise<Movie>((resolve, reject) => {
+    mp4.onError = (mod, msg) => reject(new Error(`mp4box ${mod}: ${msg}`));
+    mp4.onReady = resolve;
+    mp4.appendBuffer(MP4BoxBuffer.fromArrayBuffer(buf, 0));
+    mp4.flush();
+  });
+
+  const track = info.videoTracks?.[0];
+  if (!track) throw new Error("No video track in file");
+
+  const raw: Sample[] = [];
+  mp4.onSamples = (_id, _user, s) => raw.push(...s);
+  mp4.setExtractionOptions(track.id, undefined, {
+    nbSamples: Number.POSITIVE_INFINITY,
+  });
+  mp4.start();
+  if (raw.length === 0) throw new Error("No samples extracted");
+
+  const samples: DemuxSample[] = raw.map((s) => ({
+    ctsUs: (s.cts * 1e6) / s.timescale,
+    durUs: (s.duration * 1e6) / s.timescale,
+    isSync: s.is_sync,
+    data: s.data!,
+  }));
+
+  const config: VideoDecoderConfig = {
+    codec: track.codec,
+    codedWidth: track.video?.width ?? track.track_width,
+    codedHeight: track.video?.height ?? track.track_height,
+    description: codecDescription(raw[0]),
+  };
+
+  return { config, samples };
+}
+
+/** Codec config record (avcC/hvcC/…) without the 8-byte box header. */
+function codecDescription(sample: Sample): Uint8Array {
+  const entry = sample.description as {
+    avcC?: { write(s: DataStream): void };
+    hvcC?: { write(s: DataStream): void };
+    vpcC?: { write(s: DataStream): void };
+    av1C?: { write(s: DataStream): void };
+  };
+  const box = entry.avcC ?? entry.hvcC ?? entry.vpcC ?? entry.av1C;
+  if (!box) throw new Error("No codec description (avcC/hvcC) in sample entry");
+  const stream = new DataStream(); // big-endian, dynamic size
+  box.write(stream);
+  return new Uint8Array(stream.buffer, 8, stream.byteLength - 8);
 }

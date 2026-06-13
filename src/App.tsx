@@ -106,13 +106,12 @@ export function App() {
     setOutputs([]);
     try {
       const res = await renderGifs(
-        prep.frames,
+        prep,
         range,
         effectiveCrop,
         {
           removeBackground: removeBg,
           autoTighten,
-          fps: prep.fps,
           sizes: [
             { label: "original", maxEdge: null, maxBytes: null },
             {

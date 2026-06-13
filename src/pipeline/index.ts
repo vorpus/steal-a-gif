@@ -1,11 +1,11 @@
-import { decodeFrames } from "./decode";
+import { decodeForPreview, extractAccurateRange } from "./decode";
 import { fingerprintFrames, dedupeFrames, detectLoop } from "./loopDetect";
 import { autoCrop } from "./autoCrop";
 import { estimateBackgroundColor, keyFlatBackground } from "./bgKey";
 import { encodeGif } from "./encodeGif";
 import type { Frame, Rect } from "./types";
 
-export type Stage = "background" | "encode" | "done";
+export type Stage = "extract" | "background" | "encode" | "done";
 
 /** One requested output size. */
 export interface SizeSpec {
@@ -31,12 +31,15 @@ export interface ExtractResult {
 
 /** Decoded, de-duplicated frames plus a suggested loop range to start from. */
 export interface Prepared {
+  /** Preview frames (fast, possibly lossy) that drive the scrubber/preview. */
   frames: Frame[];
   fps: number;
   width: number;
   height: number;
   /** Auto-suggested loop, as indices into `frames`. The user refines it. */
   suggested: { start: number; end: number };
+  /** Kept so the final render can re-decode the chosen range accurately. */
+  file: File;
 }
 
 /**
@@ -48,7 +51,8 @@ export interface Prepared {
  * Control Center open at the end of the clip).
  */
 export async function prepareFrames(file: File): Promise<Prepared> {
-  const raw = await decodeFrames(file);
+  // Fast/lossy decode is fine here — these frames only drive the UI.
+  const raw = await decodeForPreview(file);
   if (raw.length === 0) throw new Error("No frames decoded from this file");
 
   const width = raw[0].bitmap.width;
@@ -66,27 +70,65 @@ export async function prepareFrames(file: File): Promise<Prepared> {
     width,
     height,
     suggested: { start: loop.startIndex, end: loop.endIndex },
+    file,
   };
 }
 
 /**
- * Turn a user-chosen frame range + crop into downloadable GIFs. All output
- * sizes derive from the same matte so they always agree.
+ * Turn a user-chosen frame range + crop into downloadable GIFs.
+ *
+ * The preview frames may have dropped frames (fast lossy decode), so for the
+ * final render we map the chosen range to a TIME window and re-decode it
+ * accurately (every frame, real timing). If accurate decode yields nothing
+ * (e.g. a non-MP4 the demuxer can't read), we fall back to the preview slice.
  */
 export async function renderGifs(
-  frames: Frame[],
+  prepared: Prepared,
   range: { start: number; end: number },
   crop: Rect,
   opts: {
     removeBackground: boolean;
     autoTighten: boolean;
-    fps: number;
     sizes: SizeSpec[];
   },
   onStage?: (stage: Stage, detail?: string) => void,
 ): Promise<ExtractResult> {
-  const looped = frames.slice(range.start, range.end);
-  if (looped.length === 0) throw new Error("Empty loop range");
+  const preview = prepared.frames;
+  if (range.end <= range.start) throw new Error("Empty loop range");
+
+  // Time window of the selected loop, from the preview frames' timestamps.
+  const startF = preview[range.start];
+  const endF = preview[range.end - 1];
+  const fallbackMs0 = 1000 / prepared.fps;
+  const t0Us = startF.timestampUs;
+  const t1Us = endF.timestampUs + (endF.durationUs ?? fallbackMs0 * 1000);
+
+  onStage?.("extract");
+  const accurate = await extractAccurateRange(
+    prepared.file,
+    t0Us,
+    t1Us,
+    (d, t) => onStage?.("extract", `${d}/${t}`),
+  );
+
+  let looped: Frame[];
+  if (accurate.length >= 2) {
+    // Collapse held duplicates among the full-rate frames, preserving the real
+    // per-frame durations, then pin the last frame's duration so the loop's
+    // total time matches the selected window exactly.
+    const full: Rect = {
+      x: 0,
+      y: 0,
+      width: accurate[0].bitmap.width,
+      height: accurate[0].bitmap.height,
+    };
+    const prints = await fingerprintFrames(accurate, full);
+    looped = dedupeFrames(accurate, prints).frames;
+    const last = looped[looped.length - 1];
+    last.durationUs = Math.max(1, t1Us - last.timestampUs);
+  } else {
+    looped = preview.slice(range.start, range.end);
+  }
 
   const tight = opts.autoTighten ? await autoCrop(looped, crop) : crop;
 
@@ -102,7 +144,7 @@ export async function renderGifs(
 
   // Real per-frame on-screen time (ms) from the recording, so the GIF keeps
   // the source cadence instead of a single guessed fps.
-  const fallbackMs = 1000 / opts.fps;
+  const fallbackMs = 1000 / prepared.fps;
   const delaysMs = looped.map((f) =>
     f.durationUs ? f.durationUs / 1000 : fallbackMs,
   );
@@ -117,7 +159,7 @@ export async function renderGifs(
       sized,
       {
         maxEdge: size.maxEdge,
-        fps: opts.fps,
+        fps: prepared.fps,
         removeBackground: opts.removeBackground,
         maxBytes: size.maxBytes,
       },
@@ -131,7 +173,7 @@ export async function renderGifs(
     outputs,
     finalCrop: tight,
     frameCount: looped.length,
-    fps: opts.fps,
+    fps: prepared.fps,
   };
 }
 

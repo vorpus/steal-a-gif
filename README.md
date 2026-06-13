@@ -11,8 +11,7 @@ machine: no upload, no server, no per-image cost.
 
 ```
 screen recording
-   │  decode.ts        WebCodecs (mp4box demux, every coded frame) → frames
-   │                   falls back to <video> + rVFC for unsupported codecs
+   │  decode.ts        PREVIEW: <video> + rVFC (fast, lossy) → scrubber frames
    ▼
 frames
    │  loopDetect.ts    dedupe capture duplicates; SUGGEST a loop range
@@ -22,6 +21,8 @@ distinct frames + suggested range
    │  CropCanvas       MANUAL: drag a box around the animation
    ▼
 range + crop
+   │  decode.ts        ACCURATE: re-decode just the chosen time window —
+   │                   WebCodecs (H.264) or seek the <video> per frame (HEVC)
    │  autoCrop.ts      (optional) per-pixel motion map → tighten the box
    │  bgKey.ts         (optional) flood-fill the flat app background from edges
    ▼
@@ -35,6 +36,14 @@ The loop and crop are **user-driven** — auto-detection only seeds a starting
 guess. No heuristic reliably tells the animation apart from, say, swiping
 Control Center open at the end of the clip, so the user owns the final call with
 a live preview to confirm the loop is seamless.
+
+**Two-pass decode.** Preview/scrubbing use a fast real-time capture where
+dropped frames don't matter. Only when you hit *Make GIF* does it re-decode the
+trimmed window at full fidelity. That render path tries WebCodecs first, but
+falls back to seeking the `<video>` element frame-by-frame — which uses the
+browser's *native* decode, so HEVC screen recordings (what iPhones produce, and
+which most Chrome builds can't decode via WebCodecs) still come out complete and
+at the right speed.
 
 ### The interesting bits
 
