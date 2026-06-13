@@ -44,8 +44,14 @@ export interface Prepared {
   suggested: { start: number; end: number };
   /** Kept so the final render can re-decode the chosen range accurately. */
   file: File;
-  /** How the accurate render will decode: exact, slower-but-works, etc. */
-  compat: "webcodecs" | "fallback";
+  /**
+   * How the accurate render will decode:
+   *  - "webcodecs": exact, every frame.
+   *  - "fallback": no WebCodecs, but the <video> element can decode it (slower).
+   *  - "incompatible": can't decode accurately at all (e.g. HEVC in Firefox);
+   *    the render uses the lossy preview frames instead — works, fewer frames.
+   */
+  compat: "webcodecs" | "fallback" | "incompatible";
 }
 
 /**
@@ -57,15 +63,11 @@ export interface Prepared {
  * Control Center open at the end of the clip).
  */
 export async function prepareFrames(file: File): Promise<Prepared> {
-  // Check up front whether this browser can actually produce an accurate
-  // render of this file, so we fail (or warn) BEFORE the user crops/trims —
-  // not after they click Make GIF. (e.g. HEVC is undecodable in Firefox.)
+  // Check up front how this browser can decode this file, so we can warn the
+  // user BEFORE they crop/trim — not after they click Make GIF. When accurate
+  // decode is impossible (e.g. HEVC in Firefox) we don't block: the render
+  // falls back to the lossy preview frames (fewer frames, but it works).
   const compat = await probeDecodability(file);
-  if (compat === "incompatible") {
-    throw new Error(
-      "Your browser can't decode this video — it's likely HEVC. Open this page in Chrome or Safari, or re-export the clip as H.264.",
-    );
-  }
 
   // Fast/lossy decode is fine here — these frames only drive the UI.
   const raw = await decodeForPreview(file);
@@ -120,13 +122,21 @@ export async function renderGifs(
   const t0Us = startF.timestampUs;
   const t1Us = endF.timestampUs + (endF.durationUs ?? fallbackMs0 * 1000);
 
-  onStage?.("extract");
-  const accurate = await extractAccurateRange(
-    prepared.file,
-    t0Us,
-    t1Us,
-    (d, t) => onStage?.("extract", `${d}/${t}`),
-  );
+  // Accurately re-decode the window, unless we already know this browser can't
+  // (HEVC in Firefox) — then skip straight to the lossy preview frames. Guard
+  // with try/catch so an unexpected decode failure still degrades gracefully
+  // rather than erroring out the whole export.
+  let accurate: Frame[] = [];
+  if (prepared.compat !== "incompatible") {
+    onStage?.("extract");
+    try {
+      accurate = await extractAccurateRange(prepared.file, t0Us, t1Us, (d, t) =>
+        onStage?.("extract", `${d}/${t}`),
+      );
+    } catch (e) {
+      console.warn("[steal-a-gif] accurate decode failed; using preview", e);
+    }
+  }
 
   let looped: Frame[];
   if (accurate.length >= 1) {

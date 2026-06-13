@@ -186,8 +186,14 @@ export function App() {
       {prep && prep.compat === "fallback" && (
         <div className="banner">
           ⚠ Your browser can't hardware-decode this file, so the export uses a
-          slower path and may take a few seconds. If it fails, try Chrome or
-          Safari.
+          slower path and may take a few seconds.
+        </div>
+      )}
+      {prep && prep.compat === "incompatible" && (
+        <div className="banner">
+          ⚠ Your browser can't fully decode this video (likely HEVC), so the
+          export will use the lower-frame-rate preview capture. For every frame,
+          open this page in Chrome or Safari.
         </div>
       )}
 
