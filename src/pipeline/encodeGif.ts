@@ -28,16 +28,24 @@ export async function encodeGif(
     Math.max(20, Math.round(delaysMs?.[i] ?? 1000 / opts.fps)),
   );
 
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // Don't shrink the emoji below this longest edge.
+  const MIN_EDGE = 72;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
     const bytes = encodeOnce(working, delays, paletteColors, transparent);
     if (!opts.maxBytes || bytes.length <= opts.maxBytes) {
       return new Blob([bytes], { type: "image/gif" });
     }
-    // Over budget: first squeeze the palette, then start dropping resolution.
-    if (paletteColors > 64) {
+    // Over budget: shrink RESOLUTION first and keep the colour count high — a
+    // coarser palette makes per-frame compression noise cross colour buckets,
+    // which flashes. Only drop colours once we're at the size floor.
+    const edge = Math.max(working[0].width, working[0].height);
+    if (edge > MIN_EDGE) {
+      working = working.map((f) => downscale(f, 0.85));
+    } else if (paletteColors > 32) {
       paletteColors = Math.floor(paletteColors / 2);
     } else {
-      working = working.map((f) => downscale(f, 0.85));
+      break;
     }
   }
 
