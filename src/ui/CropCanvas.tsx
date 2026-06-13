@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Rect } from "../pipeline";
 
 type Corner = "nw" | "ne" | "sw" | "se";
@@ -15,8 +15,8 @@ type Drag =
 
 /**
  * Crop selector with draggable corner/edge handles and an optional square
- * lock. Emits the rectangle in *source-pixel* coordinates so the pipeline can
- * crop the real frames regardless of display scaling.
+ * lock. Sizes itself to fit the parent box (so the whole tool fits one
+ * viewport) and emits the rectangle in *source-pixel* coordinates.
  */
 export function CropCanvas({
   bitmap,
@@ -32,6 +32,8 @@ export function CropCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  const [disp, setDisp] = useState<{ w: number; h: number } | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const W = bitmap.width;
   const H = bitmap.height;
 
@@ -41,6 +43,27 @@ export function CropCanvas({
     canvas.height = H;
     canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
   }, [bitmap, W, H]);
+
+  // Fit the displayed canvas inside the available parent area, preserving
+  // aspect. Measured in JS so the wrapper exactly matches the drawn canvas
+  // (the crop overlay math depends on wrapper rect == canvas rect).
+  useLayoutEffect(() => {
+    const parent = wrapRef.current!.parentElement!;
+    const fit = () => {
+      const aw = parent.clientWidth;
+      const ah = parent.clientHeight;
+      if (!aw || !ah) return;
+      const scale = Math.min(aw / W, ah / H);
+      setDisp({
+        w: Math.max(1, Math.floor(W * scale)),
+        h: Math.max(1, Math.floor(H * scale)),
+      });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, [W, H]);
 
   const toSource = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect();
@@ -61,8 +84,6 @@ export function CropCanvas({
     return { x, y, width, height };
   };
 
-  // Build a box from a fixed anchor corner to a moving point, square-locked
-  // by extending both axes to the larger delta.
   const fromAnchor = (ax: number, ay: number, px: number, py: number): Rect => {
     let dx = px - ax;
     let dy = py - ay;
@@ -94,7 +115,6 @@ export function CropCanvas({
         return fromAnchor(l, bot, px, py);
       case "sw":
         return fromAnchor(r, t, px, py);
-      // Edge handles only appear when not square-locked.
       case "e":
         return { x: l, y: t, width: px - l, height: b.height };
       case "w":
@@ -109,6 +129,7 @@ export function CropCanvas({
   const beginDrag = (d: Drag) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setHover(null);
     drag.current = d;
     const onMove = (ev: PointerEvent) => {
       if (!drag.current) return;
@@ -138,11 +159,6 @@ export function CropCanvas({
     window.addEventListener("pointerup", onUp);
   };
 
-  const onCanvasDown = (e: React.PointerEvent) => {
-    const p = toSource(e.clientX, e.clientY);
-    beginDrag({ kind: "draw", x0: p.x, y0: p.y })(e);
-  };
-
   const pct = (n: number, total: number) => `${(n / total) * 100}%`;
   const overlay: React.CSSProperties = value
     ? {
@@ -166,12 +182,33 @@ export function CropCanvas({
   const visibleHandles: Handle[] = square ? CORNERS : [...CORNERS, ...EDGES];
 
   return (
-    <div className="cropwrap" ref={wrapRef}>
+    <div
+      className="cropwrap"
+      ref={wrapRef}
+      style={disp ? { width: disp.w, height: disp.h } : undefined}
+    >
       <canvas
         ref={canvasRef}
-        className="cropcanvas"
-        onPointerDown={onCanvasDown}
+        className={`cropcanvas ${value ? "" : "empty"}`}
+        style={disp ? { width: disp.w, height: disp.h } : undefined}
+        onPointerDown={(e) => {
+          const p = toSource(e.clientX, e.clientY);
+          beginDrag({ kind: "draw", x0: p.x, y0: p.y })(e);
+        }}
+        onPointerMove={(e) => {
+          if (value || drag.current) return;
+          const rect = wrapRef.current!.getBoundingClientRect();
+          setHover({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }}
+        onPointerLeave={() => setHover(null)}
       />
+
+      {!value && hover && (
+        <div className="crophint" style={{ left: hover.x, top: hover.y }}>
+          drag to select animation
+        </div>
+      )}
+
       {value && (
         <div
           className="cropbox"

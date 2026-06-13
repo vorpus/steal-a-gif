@@ -29,6 +29,7 @@ export function App() {
   const [stageDetail, setStageDetail] = useState("");
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const outputsRef = useRef<Output[]>([]);
   const rendering = stage !== null && stage !== "done";
 
@@ -49,7 +50,6 @@ export function App() {
     try {
       const prepared = await prepareFrames(f);
       setPrep(prepared);
-      setCrop({ x: 0, y: 0, width: prepared.width, height: prepared.height });
       setRange(prepared.suggested);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -58,15 +58,57 @@ export function App() {
     }
   }, []);
 
+  // Drag-and-drop a file anywhere on the window.
+  useEffect(() => {
+    let depth = 0;
+    const isFile = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onEnter = (e: DragEvent) => {
+      if (!isFile(e)) return;
+      e.preventDefault();
+      depth++;
+      setDragging(true);
+    };
+    const onOver = (e: DragEvent) => {
+      if (isFile(e)) e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!isFile(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      const f = e.dataTransfer?.files?.[0];
+      if (f) onFile(f);
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [onFile]);
+
+  const effectiveCrop: Rect | null = prep
+    ? crop ?? { x: 0, y: 0, width: prep.width, height: prep.height }
+    : null;
+
   const run = useCallback(async () => {
-    if (!prep || !crop || !range) return;
+    if (!prep || !effectiveCrop || !range) return;
     setError(null);
     setOutputs([]);
     try {
       const res = await renderGifs(
         prep.frames,
         range,
-        crop,
+        effectiveCrop,
         {
           removeBackground: removeBg,
           autoTighten,
@@ -85,10 +127,9 @@ export function App() {
           setStageDetail(d ?? "");
         },
       );
-
       const labels: Record<string, string> = {
-        original: `Original (${res.finalCrop.width}×${res.finalCrop.height}, ${res.frameCount} frames)`,
-        slack: "Slack emoji (128px)",
+        original: `Original · ${res.finalCrop.width}×${res.finalCrop.height} · ${res.frameCount}f`,
+        slack: "Slack · 128px",
       };
       const next: Output[] = res.outputs.map((o) => ({
         label: labels[o.label] ?? o.label,
@@ -102,123 +143,146 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       setStage(null);
     }
-  }, [prep, crop, range, removeBg, autoTighten]);
+  }, [prep, effectiveCrop, range, removeBg, autoTighten]);
+
+  const orientation =
+    prep && prep.height > prep.width ? "vertical" : "horizontal";
 
   return (
     <main className="app">
-      <header>
-        <h1>steal-a-gif</h1>
-        <p className="tagline">
-          Screen-record a GIF that won't let you save it, drop the clip here,
-          and get a clean GIF back.
-        </p>
-      </header>
+      {dragging && (
+        <div className="scrim">
+          <div className="scrim-msg">Drop anywhere to upload</div>
+        </div>
+      )}
 
-      <section className="step">
-        <label className="filepick">
+      <header className="topbar">
+        <h1>steal-a-gif</h1>
+        <label className="filepick-sm">
           <input
             type="file"
             accept="video/*,image/gif"
             onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
           />
-          {preparing ? "Decoding…" : prep ? "Choose a different clip" : "Choose a screen recording…"}
+          {preparing ? "Decoding…" : prep ? "Change clip" : "Upload"}
         </label>
-      </section>
+      </header>
 
-      {prep && crop && (
-        <section className="step">
-          <h2>1 · Box the animation</h2>
-          <label className="inlinecheck">
-            <input
-              type="checkbox"
-              checked={square}
-              onChange={(e) => {
-                setSquare(e.target.checked);
-                // Snap the current box to a centered square on enable.
-                if (e.target.checked && crop) {
-                  const side = Math.min(crop.width, crop.height);
-                  setCrop({
-                    x: crop.x + (crop.width - side) / 2,
-                    y: crop.y + (crop.height - side) / 2,
-                    width: side,
-                    height: side,
-                  });
-                }
-              }}
-            />
-            Lock to square
-          </label>
-          <CropCanvas
-            bitmap={prep.frames[0].bitmap}
-            value={crop}
-            square={square}
-            onCrop={setCrop}
-          />
-        </section>
+      {!prep && (
+        <div className="empty">
+          {preparing ? (
+            <p>Decoding…</p>
+          ) : error ? (
+            <p className="error">⚠ {error}</p>
+          ) : (
+            <p>
+              Drag a screen recording anywhere on the page,
+              <br />
+              or click <strong>Upload</strong>.
+            </p>
+          )}
+        </div>
       )}
 
-      {prep && crop && range && (
-        <section className="step">
-          <h2>2 · Trim to one loop</h2>
-          <p className="hint">
-            Drag the handles so the preview plays one clean cycle with no jump.
-          </p>
-          <LoopSelector
-            frames={prep.frames}
-            crop={crop}
-            fps={prep.fps}
-            value={range}
-            onChange={setRange}
-          />
-        </section>
-      )}
+      {prep && effectiveCrop && range && (
+        <div className={`workspace ${orientation}`}>
+          <div className="stage">
+            <div className="stage-toolbar">
+              <label className="inlinecheck">
+                <input
+                  type="checkbox"
+                  checked={square}
+                  onChange={(e) => {
+                    setSquare(e.target.checked);
+                    if (e.target.checked && crop) {
+                      const side = Math.min(crop.width, crop.height);
+                      setCrop({
+                        x: crop.x + (crop.width - side) / 2,
+                        y: crop.y + (crop.height - side) / 2,
+                        width: side,
+                        height: side,
+                      });
+                    }
+                  }}
+                />
+                Lock to square
+              </label>
+              {crop && (
+                <button className="link" onClick={() => setCrop(null)}>
+                  Clear box
+                </button>
+              )}
+            </div>
+            <div className="stage-canvas">
+              <CropCanvas
+                bitmap={prep.frames[0].bitmap}
+                value={crop}
+                square={square}
+                onCrop={setCrop}
+              />
+            </div>
+          </div>
 
-      {prep && (
-        <section className="step controls">
-          <label>
-            <input
-              type="checkbox"
-              checked={removeBg}
-              onChange={(e) => setRemoveBg(e.target.checked)}
-            />
-            Remove app background
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={autoTighten}
-              onChange={(e) => setAutoTighten(e.target.checked)}
-            />
-            Auto-tighten crop
-          </label>
-          <button onClick={run} disabled={rendering}>
-            {rendering ? "Working…" : "Make GIF"}
-          </button>
-        </section>
-      )}
+          <div className="panel">
+            <div className="panel-block">
+              <h2>Trim to one loop</h2>
+              <LoopSelector
+                frames={prep.frames}
+                crop={effectiveCrop}
+                fps={prep.fps}
+                value={range}
+                onChange={setRange}
+              />
+            </div>
 
-      {rendering && (
-        <section className="step status">
-          <span className="spinner" aria-hidden /> {stage} {stageDetail}
-        </section>
-      )}
+            <div className="panel-block controls">
+              <label className="inlinecheck">
+                <input
+                  type="checkbox"
+                  checked={removeBg}
+                  onChange={(e) => setRemoveBg(e.target.checked)}
+                />
+                Remove app background
+              </label>
+              <label className="inlinecheck">
+                <input
+                  type="checkbox"
+                  checked={autoTighten}
+                  onChange={(e) => setAutoTighten(e.target.checked)}
+                />
+                Auto-tighten crop
+              </label>
+              <button onClick={run} disabled={rendering}>
+                {rendering ? "Working…" : "Make GIF"}
+              </button>
+              {rendering && (
+                <span className="status">
+                  <span className="spinner" aria-hidden /> {stage} {stageDetail}
+                </span>
+              )}
+              {error && <span className="error">⚠ {error}</span>}
+            </div>
 
-      {error && <section className="step error">⚠ {error}</section>}
-
-      {outputs.length > 0 && (
-        <section className="step results">
-          {outputs.map((o) => (
-            <figure key={o.label}>
-              <img src={o.url} alt={o.label} />
-              <figcaption>
-                {o.label} — {(o.bytes / 1024).toFixed(0)} KB
-                <a href={o.url} download={`steal-a-gif-${slug(o.label)}.gif`}>
-                  Download
-                </a>
-              </figcaption>
-            </figure>
-          ))}
-        </section>
+            {outputs.length > 0 && (
+              <div className="panel-block results">
+                {outputs.map((o) => (
+                  <figure key={o.label}>
+                    <img src={o.url} alt={o.label} />
+                    <figcaption>
+                      {o.label} · {(o.bytes / 1024).toFixed(0)}KB
+                      <a
+                        href={o.url}
+                        download={`steal-a-gif-${slug(o.label)}.gif`}
+                      >
+                        Download
+                      </a>
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </main>
   );
