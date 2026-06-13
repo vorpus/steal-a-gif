@@ -136,15 +136,27 @@ export async function extractAccurateRange(
     }));
     if (support.supported) {
       try {
-        return await decodeWindowWebCodecs(config, samples, t0Us, t1Us);
+        const frames = await decodeWindowWebCodecs(config, samples, t0Us, t1Us);
+        console.info(
+          `[steal-a-gif] accurate decode: WebCodecs · codec=${config.codec} · ${picks.length} samples in window → ${frames.length} frames`,
+        );
+        return frames;
       } catch (e) {
         console.warn("WebCodecs window decode failed; seeking instead", e);
       }
+    } else {
+      console.info(
+        `[steal-a-gif] WebCodecs can't decode ${config.codec}; using seek path`,
+      );
     }
   }
 
   // Universal fallback: native decode via seeking (handles HEVC).
-  return await extractBySeek(file, picks, onProgress);
+  const frames = await extractBySeek(file, picks, onProgress);
+  console.info(
+    `[steal-a-gif] accurate decode: seek · ${picks.length} samples in window → ${frames.length} frames`,
+  );
+  return frames;
 }
 
 async function decodeWindowWebCodecs(
@@ -226,8 +238,7 @@ async function extractBySeek(
       // Seek to the middle of the frame's display interval so rounding can't
       // land us on a neighbouring frame.
       const tSec = (s.ctsUs + s.durUs / 2) / 1e6;
-      await seekTo(video, tSec);
-      const bitmap = await createImageBitmap(video);
+      const bitmap = await seekAndGrab(video, tSec);
       frames.push({ bitmap, timestampUs: s.ctsUs });
       onProgress?.(i + 1, picks.length);
     }
@@ -237,11 +248,37 @@ async function extractBySeek(
   }
 }
 
-function seekTo(video: HTMLVideoElement, tSec: number): Promise<void> {
-  return new Promise((resolve) => {
+/**
+ * Seek to a time and capture the frame that's actually presented there.
+ *
+ * `seeked` alone is not enough: it fires when the seek completes, but
+ * `createImageBitmap(video)` can still read the previous (stale) frame because
+ * the new one hasn't been presented yet — that produces duplicate captures and
+ * dropped animation. So after `seeked` we wait for requestVideoFrameCallback,
+ * which fires when the new frame is presented, then grab. A short timeout
+ * covers browsers that don't fire rVFC on a paused seek.
+ */
+function seekAndGrab(
+  video: HTMLVideoElement,
+  tSec: number,
+): Promise<ImageBitmap> {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const grab = () => {
+      if (done) return;
+      done = true;
+      createImageBitmap(video).then(resolve, reject);
+    };
     const onSeeked = () => {
       video.removeEventListener("seeked", onSeeked);
-      resolve();
+      if ("requestVideoFrameCallback" in video) {
+        rvfc(video, () => grab());
+        // Fallback if rVFC doesn't fire for this paused seek.
+        setTimeout(grab, 80);
+      } else {
+        // No rVFC: a paint tick is the best signal we have.
+        requestAnimationFrame(() => requestAnimationFrame(grab));
+      }
     };
     video.addEventListener("seeked", onSeeked);
     video.currentTime = tSec;

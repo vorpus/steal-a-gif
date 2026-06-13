@@ -120,6 +120,9 @@ export async function renderGifs(
     // the old "missing frames" bug. Each kept frame gets its real on-screen
     // duration; the last spans to the window end so loop timing is exact.
     looped = await collapseHeldDuplicates(accurate, t1Us);
+    console.info(
+      `[steal-a-gif] window ${(t0Us / 1e3).toFixed(0)}–${(t1Us / 1e3).toFixed(0)}ms · ${accurate.length} decoded → ${looped.length} distinct frames`,
+    );
   } else {
     looped = preview.slice(range.start, range.end);
   }
