@@ -210,6 +210,7 @@ async function decodeWindowWebCodecs(
   await Promise.all(pending);
   decoder.close();
 
+  if (frames.length === 0) throw new Error("WebCodecs produced no frames");
   frames.sort((a, b) => a.timestampUs - b.timestampUs);
   return frames;
 }
@@ -326,7 +327,10 @@ async function demux(file: File): Promise<Demuxed> {
     ctsUs: (s.cts * 1e6) / s.timescale,
     durUs: (s.duration * 1e6) / s.timescale,
     isSync: s.is_sync,
-    data: s.data!,
+    // COPY the bytes: mp4box reuses its internal sample buffers, so holding a
+    // reference and feeding it later gives the decoder garbage ("Decoder
+    // failure"). A standalone copy is stable until we decode.
+    data: new Uint8Array(s.data!),
   }));
 
   const config: VideoDecoderConfig = {
