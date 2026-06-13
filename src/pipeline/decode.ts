@@ -240,17 +240,38 @@ async function extractBySlowPlay(
 
   try {
     await new Promise<void>((resolve, reject) => {
-      video.onloadeddata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to load video"));
+      const t = setTimeout(() => reject(new Error("Timed out loading video")), 15000);
+      video.onloadeddata = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(t);
+        reject(new Error("This browser can't decode this video"));
+      };
     });
 
     // Position just before the window so the first window frame is captured.
-    await new Promise<void>((resolve) => {
-      const onSeeked = () => {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(t);
         video.removeEventListener("seeked", onSeeked);
+        video.removeEventListener("error", onErr);
+      };
+      const onSeeked = () => {
+        cleanup();
         resolve();
       };
+      const onErr = () => {
+        cleanup();
+        reject(new Error("This browser can't decode this video"));
+      };
+      const t = setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out seeking video"));
+      }, 8000);
       video.addEventListener("seeked", onSeeked);
+      video.addEventListener("error", onErr);
       video.currentTime = Math.max(0, t0Us / 1e6 - 0.001);
     });
 
@@ -258,11 +279,30 @@ async function extractBySlowPlay(
     let lastTsUs = -1;
     video.playbackRate = 0.25;
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
+      // Watchdog: if no new frame arrives for a while the decoder has stalled
+      // (e.g. an HEVC frame the browser can't decode) — fail instead of hanging.
+      let watchdog: ReturnType<typeof setTimeout>;
+      const arm = () => {
+        clearTimeout(watchdog);
+        watchdog = setTimeout(
+          () => reject(new Error("Video decode stalled")),
+          6000,
+        );
+      };
+      const finish = () => {
+        clearTimeout(watchdog);
+        resolve();
+      };
+      video.onerror = () => {
+        clearTimeout(watchdog);
+        reject(new Error("This browser can't decode this video"));
+      };
+      video.onended = finish;
       const onFrame = async (_now: number, meta: { mediaTime: number }) => {
         const tUs = Math.round(meta.mediaTime * 1e6);
         if (tUs >= t1Us) {
-          resolve();
+          finish();
           return;
         }
         if (tUs > lastTsUs && tUs >= t0Us) {
@@ -270,18 +310,66 @@ async function extractBySlowPlay(
           const bitmap = await createImageBitmap(video);
           frames.push({ bitmap, timestampUs: tUs });
           onProgress?.(frames.length, totalEstimate);
+          arm();
         }
         rvfc(video, onFrame);
       };
+      arm();
       rvfc(video, onFrame);
-      video.onended = () => resolve();
-      void video.play();
+      void video.play().catch(() => reject(new Error("Playback failed")));
     });
 
     video.pause();
     return frames;
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Decide, at upload time, whether this browser can produce an accurate render
+ * of this file — so we can warn or block BEFORE the user does all the work.
+ *
+ *  - "webcodecs": exact decode available (best path).
+ *  - "fallback":  no WebCodecs for this codec, but the <video> element can
+ *                 decode it (a quick mid-file probe succeeded). Works, slower.
+ *  - "incompatible": neither works (e.g. HEVC in Firefox) — block with an error.
+ */
+export async function probeDecodability(
+  file: File,
+): Promise<"webcodecs" | "fallback" | "incompatible"> {
+  const isMp4 =
+    /(mp4|quicktime|m4v|x-m4v)/i.test(file.type) ||
+    /\.(mp4|mov|m4v)$/i.test(file.name);
+  if (!isMp4) return "fallback"; // non-MP4: only the <video> path applies
+
+  let demuxed: Demuxed;
+  try {
+    demuxed = await demux(file);
+  } catch {
+    return "fallback";
+  }
+
+  if (typeof VideoDecoder !== "undefined") {
+    const sup = await VideoDecoder.isConfigSupported(demuxed.config).catch(
+      () => ({ supported: false }),
+    );
+    if (sup?.supported) return "webcodecs";
+  }
+
+  // WebCodecs can't decode this codec here. Verify the <video> fallback can,
+  // by actually decoding a short mid-file window (representative of a render).
+  const mid = demuxed.samples[Math.floor(demuxed.samples.length / 2)];
+  try {
+    const frames = await extractBySlowPlay(
+      file,
+      mid.ctsUs,
+      mid.ctsUs + 350_000,
+      4,
+    );
+    return frames.length > 0 ? "fallback" : "incompatible";
+  } catch {
+    return "incompatible";
   }
 }
 

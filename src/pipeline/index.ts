@@ -1,4 +1,8 @@
-import { decodeForPreview, extractAccurateRange } from "./decode";
+import {
+  decodeForPreview,
+  extractAccurateRange,
+  probeDecodability,
+} from "./decode";
 import { fingerprintFrames, dedupeFrames, detectLoop } from "./loopDetect";
 import { autoCrop } from "./autoCrop";
 import { estimateBackgroundColor, keyFlatBackground } from "./bgKey";
@@ -40,6 +44,8 @@ export interface Prepared {
   suggested: { start: number; end: number };
   /** Kept so the final render can re-decode the chosen range accurately. */
   file: File;
+  /** How the accurate render will decode: exact, slower-but-works, etc. */
+  compat: "webcodecs" | "fallback";
 }
 
 /**
@@ -51,6 +57,16 @@ export interface Prepared {
  * Control Center open at the end of the clip).
  */
 export async function prepareFrames(file: File): Promise<Prepared> {
+  // Check up front whether this browser can actually produce an accurate
+  // render of this file, so we fail (or warn) BEFORE the user crops/trims —
+  // not after they click Make GIF. (e.g. HEVC is undecodable in Firefox.)
+  const compat = await probeDecodability(file);
+  if (compat === "incompatible") {
+    throw new Error(
+      "Your browser can't decode this video — it's likely HEVC. Open this page in Chrome or Safari, or re-export the clip as H.264.",
+    );
+  }
+
   // Fast/lossy decode is fine here — these frames only drive the UI.
   const raw = await decodeForPreview(file);
   if (raw.length === 0) throw new Error("No frames decoded from this file");
@@ -71,6 +87,7 @@ export async function prepareFrames(file: File): Promise<Prepared> {
     height,
     suggested: { start: loop.startIndex, end: loop.endIndex },
     file,
+    compat,
   };
 }
 

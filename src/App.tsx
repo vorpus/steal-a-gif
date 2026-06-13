@@ -183,6 +183,14 @@ export function App() {
         </div>
       )}
 
+      {prep && prep.compat === "fallback" && (
+        <div className="banner">
+          ⚠ Your browser can't hardware-decode this file, so the export uses a
+          slower path and may take a few seconds. If it fails, try Chrome or
+          Safari.
+        </div>
+      )}
+
       {prep && effectiveCrop && range && (
         <div className={`workspace ${orientation}`}>
           <div className="stage">
