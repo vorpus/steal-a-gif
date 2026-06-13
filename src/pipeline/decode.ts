@@ -151,10 +151,11 @@ export async function extractAccurateRange(
     }
   }
 
-  // Universal fallback: native decode via seeking (handles HEVC).
-  const frames = await extractBySeek(file, picks, onProgress);
+  // Universal fallback: slow-playback capture (handles HEVC, doesn't depend on
+  // flaky per-seek precision).
+  const frames = await extractBySlowPlay(file, t0Us, t1Us, picks.length, onProgress);
   console.info(
-    `[steal-a-gif] accurate decode: seek · ${picks.length} samples in window → ${frames.length} frames`,
+    `[steal-a-gif] accurate decode: slow-play · ${picks.length} samples in window → ${frames.length} frames`,
   );
   return frames;
 }
@@ -165,12 +166,12 @@ async function decodeWindowWebCodecs(
   t0Us: number,
   t1Us: number,
 ): Promise<Frame[]> {
-  // Start at the last keyframe at/under t0 so inter-frames decode correctly;
-  // feed through the last sample presenting before t1.
-  let startIdx = 0;
+  // Feed through the last sample presenting before t1. Feed from sample 0 (the
+  // initial IDR with full parameter sets) rather than a mid-stream keyframe —
+  // HEVC "sync" samples mid-stream can lack the parameter sets the decoder
+  // needs, which shows up as a generic "Decoder failure".
   let endIdx = 0;
   for (let i = 0; i < samples.length; i++) {
-    if (samples[i].isSync && samples[i].ctsUs <= t0Us) startIdx = i;
     if (samples[i].ctsUs < t1Us) endIdx = i;
   }
 
@@ -195,7 +196,7 @@ async function decodeWindowWebCodecs(
   });
   decoder.configure(config);
 
-  for (let i = startIdx; i <= endIdx; i++) {
+  for (let i = 0; i <= endIdx; i++) {
     const s = samples[i];
     decoder.decode(
       new EncodedVideoChunk({
@@ -215,9 +216,19 @@ async function decodeWindowWebCodecs(
   return frames;
 }
 
-async function extractBySeek(
+/**
+ * Capture every frame in [t0,t1) by playing the window at a low rate.
+ *
+ * Seeking per frame is unreliable (Safari blob seeks return stale frames). At
+ * 0.25× the compositor presents every source frame with plenty of wall-clock
+ * time to grab it via requestVideoFrameCallback, so nothing is skipped and we
+ * don't depend on per-seek precision. We capture once per distinct mediaTime.
+ */
+async function extractBySlowPlay(
   file: File,
-  picks: DemuxSample[],
+  t0Us: number,
+  t1Us: number,
+  totalEstimate: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Frame[]> {
   const url = URL.createObjectURL(file);
@@ -230,60 +241,48 @@ async function extractBySeek(
   try {
     await new Promise<void>((resolve, reject) => {
       video.onloadeddata = () => resolve();
-      video.onerror = () => reject(new Error("Failed to load video for seek"));
+      video.onerror = () => reject(new Error("Failed to load video"));
+    });
+
+    // Position just before the window so the first window frame is captured.
+    await new Promise<void>((resolve) => {
+      const onSeeked = () => {
+        video.removeEventListener("seeked", onSeeked);
+        resolve();
+      };
+      video.addEventListener("seeked", onSeeked);
+      video.currentTime = Math.max(0, t0Us / 1e6 - 0.001);
     });
 
     const frames: Frame[] = [];
-    for (let i = 0; i < picks.length; i++) {
-      const s = picks[i];
-      // Seek to the middle of the frame's display interval so rounding can't
-      // land us on a neighbouring frame.
-      const tSec = (s.ctsUs + s.durUs / 2) / 1e6;
-      const bitmap = await seekAndGrab(video, tSec);
-      frames.push({ bitmap, timestampUs: s.ctsUs });
-      onProgress?.(i + 1, picks.length);
-    }
+    let lastTsUs = -1;
+    video.playbackRate = 0.25;
+
+    await new Promise<void>((resolve) => {
+      const onFrame = async (_now: number, meta: { mediaTime: number }) => {
+        const tUs = Math.round(meta.mediaTime * 1e6);
+        if (tUs >= t1Us) {
+          resolve();
+          return;
+        }
+        if (tUs > lastTsUs && tUs >= t0Us) {
+          lastTsUs = tUs;
+          const bitmap = await createImageBitmap(video);
+          frames.push({ bitmap, timestampUs: tUs });
+          onProgress?.(frames.length, totalEstimate);
+        }
+        rvfc(video, onFrame);
+      };
+      rvfc(video, onFrame);
+      video.onended = () => resolve();
+      void video.play();
+    });
+
+    video.pause();
     return frames;
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-/**
- * Seek to a time and capture the frame that's actually presented there.
- *
- * `seeked` alone is not enough: it fires when the seek completes, but
- * `createImageBitmap(video)` can still read the previous (stale) frame because
- * the new one hasn't been presented yet — that produces duplicate captures and
- * dropped animation. So after `seeked` we wait for requestVideoFrameCallback,
- * which fires when the new frame is presented, then grab. A short timeout
- * covers browsers that don't fire rVFC on a paused seek.
- */
-function seekAndGrab(
-  video: HTMLVideoElement,
-  tSec: number,
-): Promise<ImageBitmap> {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const grab = () => {
-      if (done) return;
-      done = true;
-      createImageBitmap(video).then(resolve, reject);
-    };
-    const onSeeked = () => {
-      video.removeEventListener("seeked", onSeeked);
-      if ("requestVideoFrameCallback" in video) {
-        rvfc(video, () => grab());
-        // Fallback if rVFC doesn't fire for this paused seek.
-        setTimeout(grab, 80);
-      } else {
-        // No rVFC: a paint tick is the best signal we have.
-        requestAnimationFrame(() => requestAnimationFrame(grab));
-      }
-    };
-    video.addEventListener("seeked", onSeeked);
-    video.currentTime = tSec;
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -355,5 +354,9 @@ function codecDescription(sample: Sample): Uint8Array {
   if (!box) throw new Error("No codec description (avcC/hvcC) in sample entry");
   const stream = new DataStream(); // big-endian, dynamic size
   box.write(stream);
-  return new Uint8Array(stream.buffer, 8, stream.byteLength - 8);
+  // Copy the payload into a fresh zero-offset buffer. A subarray view with a
+  // byteOffset of 8 (and over-allocated backing buffer) can trip up decoders;
+  // a clean standalone array is safest for VideoDecoder.configure.
+  const view = new Uint8Array(stream.buffer, 8, stream.byteLength - 8);
+  return new Uint8Array(view);
 }
