@@ -14,13 +14,15 @@ screen recording
    │  decode.ts        WebCodecs / requestVideoFrameCallback → frames
    ▼
 frames
-   │  loopDetect.ts    fingerprint frames, find the loop period & cleanest seam
+   │  loopDetect.ts    dedupe capture duplicates; SUGGEST a loop range
    ▼
-one clean cycle
-   │  autoCrop.ts      per-pixel motion map → tight bounding box of the animation
+distinct frames + suggested range
+   │  LoopSelector     MANUAL: scrubber + handles + looping preview → one cycle
+   │  CropCanvas       MANUAL: drag a box around the animation
    ▼
-tight crop
-   │  bgKey.ts          (optional) flood-fill the flat app background from the edges
+range + crop
+   │  autoCrop.ts      (optional) per-pixel motion map → tighten the box
+   │  bgKey.ts         (optional) flood-fill the flat app background from edges
    ▼
 matted frames
    │  encodeGif.ts     gifenc, with a "fit to N bytes" loop for Slack's 128KB cap
@@ -28,13 +30,19 @@ matted frames
 GIF  (native size + 128px Slack emoji)
 ```
 
+The loop and crop are **user-driven** — auto-detection only seeds a starting
+guess. No heuristic reliably tells the animation apart from, say, swiping
+Control Center open at the end of the clip, so the user owns the final call with
+a live preview to confirm the loop is seamless.
+
 ### The interesting bits
 
-- **Loop detection** (`src/pipeline/loopDetect.ts`) — a screen capture has
-  partial cycles and junk at the head/tail. We reduce each frame to a 16×16
-  grayscale fingerprint and autocorrelate to find the period, then pick the
-  start offset whose loop seam is smoothest. This is what makes the output
-  loop seamlessly instead of stuttering.
+- **Capture-duplicate dedupe** (`src/pipeline/loopDetect.ts`) — a 60fps screen
+  capture of a ~10fps GIF repeats each animation frame ~6×. We fingerprint
+  frames (16×16 grayscale) and collapse near-identical runs, recovering the
+  GIF's true frame sequence and cadence. The scrubber then shows distinct
+  frames, not a wall of duplicates. `detectLoop` still scores a suggested
+  range (coverage minus seam error), but it's only a starting point.
 - **Auto-crop** (`src/pipeline/autoCrop.ts`) — inside the rough box, static app
   chrome doesn't change between frames but the animation does. We take the
   per-pixel variance across the loop and bound the moving region. This both
@@ -69,11 +77,12 @@ animation, and hit **Make GIF**.
 
 - [x] Pipeline scaffold end-to-end (decode → loop → crop → bg → encode)
 - [x] Native + Slack-sized export
+- [x] Manual loop selection: scrubber + draggable handles + looping preview
+- [x] Manual crop box (auto-tighten optional)
+- [ ] Manual crop *handles* (resize the box after drawing, nudge edges)
 - [ ] WebCodecs fast path (currently uses the `<video>` + rVFC fallback)
 - [ ] Temporal smoothing / swap ISNet for **Robust Video Matting** to kill
       per-frame edge flicker
-- [ ] Manual override handles for the auto-detected crop & loop range
-- [ ] Loop-quality score surfaced in the UI; let the user nudge start/end frame
 - [ ] APNG / WebP export (smaller + truecolor) alongside GIF
 
 ## Why this is feasible

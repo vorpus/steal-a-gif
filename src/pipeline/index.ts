@@ -5,13 +5,7 @@ import { estimateBackgroundColor, keyFlatBackground } from "./bgKey";
 import { encodeGif } from "./encodeGif";
 import type { Frame, Rect } from "./types";
 
-export type Stage =
-  | "decode"
-  | "loop"
-  | "autocrop"
-  | "background"
-  | "encode"
-  | "done";
+export type Stage = "background" | "encode" | "done";
 
 /** One requested output size. */
 export interface SizeSpec {
@@ -35,33 +29,67 @@ export interface ExtractResult {
   fps: number;
 }
 
+/** Decoded, de-duplicated frames plus a suggested loop range to start from. */
+export interface Prepared {
+  frames: Frame[];
+  fps: number;
+  width: number;
+  height: number;
+  /** Auto-suggested loop, as indices into `frames`. The user refines it. */
+  suggested: { start: number; end: number };
+}
+
 /**
- * Full extraction pipeline. Decodes the recording ONCE and derives every
- * requested size from the same loop + crop + matte, so all outputs are
- * identical except for resolution. (Decoding per size is non-deterministic —
- * frame capture is timing-dependent — and was producing mismatched exports.)
+ * Decode the recording ONCE and collapse capture duplicates, so the UI can
+ * show a scrubber of the true animation frames and a live loop preview.
  *
- *   recording -> frames -> dedupe -> loop -> tight crop -> (key bg) -> GIFs
+ * Loop detection is only used to seed the suggested range — the user owns the
+ * final start/end (auto-detection can't tell the animation from, say, swiping
+ * Control Center open at the end of the clip).
  */
-export async function extractGifs(
-  file: File,
-  roughCrop: Rect,
-  opts: { removeBackground: boolean; sizes: SizeSpec[] },
+export async function prepareFrames(file: File): Promise<Prepared> {
+  const raw = await decodeFrames(file);
+  if (raw.length === 0) throw new Error("No frames decoded from this file");
+
+  const width = raw[0].bitmap.width;
+  const height = raw[0].bitmap.height;
+  const full: Rect = { x: 0, y: 0, width, height };
+
+  // Fingerprint over the whole frame so dedupe reacts to any change.
+  const prints = await fingerprintFrames(raw, full);
+  const { frames, prints: dprints } = dedupeFrames(raw, prints);
+  const loop = detectLoop(frames, dprints);
+
+  return {
+    frames,
+    fps: loop.fps,
+    width,
+    height,
+    suggested: { start: loop.startIndex, end: loop.endIndex },
+  };
+}
+
+/**
+ * Turn a user-chosen frame range + crop into downloadable GIFs. All output
+ * sizes derive from the same matte so they always agree.
+ */
+export async function renderGifs(
+  frames: Frame[],
+  range: { start: number; end: number },
+  crop: Rect,
+  opts: {
+    removeBackground: boolean;
+    autoTighten: boolean;
+    fps: number;
+    sizes: SizeSpec[];
+  },
   onStage?: (stage: Stage, detail?: string) => void,
 ): Promise<ExtractResult> {
-  onStage?.("decode");
-  const raw = await decodeFrames(file);
+  const looped = frames.slice(range.start, range.end);
+  if (looped.length === 0) throw new Error("Empty loop range");
 
-  onStage?.("loop");
-  const rawPrints = await fingerprintFrames(raw, roughCrop);
-  const { frames, prints } = dedupeFrames(raw, rawPrints);
-  const loop = detectLoop(frames, prints);
-  const looped = frames.slice(loop.startIndex, loop.endIndex);
+  const tight = opts.autoTighten ? await autoCrop(looped, crop) : crop;
 
-  onStage?.("autocrop");
-  const tight = await autoCrop(looped, roughCrop);
-
-  // Render the loop once at native crop resolution.
   let base = renderFrames(looped, tight).map((c) =>
     c.getContext("2d")!.getImageData(0, 0, c.width, c.height),
   );
@@ -80,7 +108,7 @@ export async function extractGifs(
       : base;
     const gif = await encodeGif(sized, {
       maxEdge: size.maxEdge,
-      fps: loop.fps,
+      fps: opts.fps,
       removeBackground: opts.removeBackground,
       maxBytes: size.maxBytes,
     });
@@ -92,7 +120,7 @@ export async function extractGifs(
     outputs,
     finalCrop: tight,
     frameCount: looped.length,
-    fps: loop.fps,
+    fps: opts.fps,
   };
 }
 

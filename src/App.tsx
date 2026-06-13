@@ -1,12 +1,15 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  extractGifs,
+  prepareFrames,
+  renderGifs,
   SLACK_EMOJI_BYTES,
   SLACK_EMOJI_EDGE,
+  type Prepared,
   type Rect,
   type Stage,
 } from "./pipeline";
 import { CropCanvas } from "./ui/CropCanvas";
+import { LoopSelector, type LoopRange } from "./ui/LoopSelector";
 
 interface Output {
   label: string;
@@ -15,36 +18,58 @@ interface Output {
 }
 
 export function App() {
-  const [file, setFile] = useState<File | null>(null);
+  const [prep, setPrep] = useState<Prepared | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [crop, setCrop] = useState<Rect | null>(null);
-  const [stage, setStage] = useState<Stage | null>(null);
-  const [stageDetail, setStageDetail] = useState<string>("");
+  const [range, setRange] = useState<LoopRange | null>(null);
   const [removeBg, setRemoveBg] = useState(true);
+  const [autoTighten, setAutoTighten] = useState(true);
+  const [stage, setStage] = useState<Stage | null>(null);
+  const [stageDetail, setStageDetail] = useState("");
   const [outputs, setOutputs] = useState<Output[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const busy = stage !== null && stage !== "done";
   const outputsRef = useRef<Output[]>([]);
+  const rendering = stage !== null && stage !== "done";
 
-  const onFile = useCallback((f: File) => {
+  useEffect(
+    () => () => outputsRef.current.forEach((o) => URL.revokeObjectURL(o.url)),
+    [],
+  );
+
+  const onFile = useCallback(async (f: File) => {
     outputsRef.current.forEach((o) => URL.revokeObjectURL(o.url));
     outputsRef.current = [];
     setOutputs([]);
     setError(null);
+    setPrep(null);
     setCrop(null);
-    setFile(f);
+    setRange(null);
+    setPreparing(true);
+    try {
+      const prepared = await prepareFrames(f);
+      setPrep(prepared);
+      setCrop({ x: 0, y: 0, width: prepared.width, height: prepared.height });
+      setRange(prepared.suggested);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPreparing(false);
+    }
   }, []);
 
   const run = useCallback(async () => {
-    if (!file || !crop) return;
+    if (!prep || !crop || !range) return;
     setError(null);
     setOutputs([]);
     try {
-      // Decode once; derive both sizes from the same loop + crop + matte.
-      const res = await extractGifs(
-        file,
+      const res = await renderGifs(
+        prep.frames,
+        range,
         crop,
         {
           removeBackground: removeBg,
+          autoTighten,
+          fps: prep.fps,
           sizes: [
             { label: "original", maxEdge: null, maxBytes: null },
             {
@@ -76,7 +101,7 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       setStage(null);
     }
-  }, [file, crop, removeBg]);
+  }, [prep, crop, range, removeBg, autoTighten]);
 
   return (
     <main className="app">
@@ -95,18 +120,34 @@ export function App() {
             accept="video/*,image/gif"
             onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
           />
-          {file ? file.name : "Choose a screen recording…"}
+          {preparing ? "Decoding…" : prep ? "Choose a different clip" : "Choose a screen recording…"}
         </label>
       </section>
 
-      {file && (
+      {prep && crop && (
         <section className="step">
-          <h2>Drag a box around the animation</h2>
-          <CropCanvas file={file} onCrop={setCrop} />
+          <h2>1 · Box the animation</h2>
+          <CropCanvas bitmap={prep.frames[0].bitmap} value={crop} onCrop={setCrop} />
         </section>
       )}
 
-      {crop && (
+      {prep && crop && range && (
+        <section className="step">
+          <h2>2 · Trim to one loop</h2>
+          <p className="hint">
+            Drag the handles so the preview plays one clean cycle with no jump.
+          </p>
+          <LoopSelector
+            frames={prep.frames}
+            crop={crop}
+            fps={prep.fps}
+            value={range}
+            onChange={setRange}
+          />
+        </section>
+      )}
+
+      {prep && (
         <section className="step controls">
           <label>
             <input
@@ -116,15 +157,23 @@ export function App() {
             />
             Remove app background
           </label>
-          <button onClick={run} disabled={busy}>
-            {busy ? "Working…" : "Make GIF"}
+          <label>
+            <input
+              type="checkbox"
+              checked={autoTighten}
+              onChange={(e) => setAutoTighten(e.target.checked)}
+            />
+            Auto-tighten crop
+          </label>
+          <button onClick={run} disabled={rendering}>
+            {rendering ? "Working…" : "Make GIF"}
           </button>
         </section>
       )}
 
-      {busy && (
+      {rendering && (
         <section className="step status">
-          <Spinner /> {stage} {stageDetail}
+          <span className="spinner" aria-hidden /> {stage} {stageDetail}
         </section>
       )}
 
@@ -147,10 +196,6 @@ export function App() {
       )}
     </main>
   );
-}
-
-function Spinner() {
-  return <span className="spinner" aria-hidden />;
 }
 
 function slug(s: string): string {

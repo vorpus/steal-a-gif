@@ -2,43 +2,31 @@ import { useEffect, useRef, useState } from "react";
 import type { Rect } from "../pipeline";
 
 /**
- * Shows the first frame of the recording and lets the user drag a rough
- * selection box. Emits the rectangle in *source-pixel* coordinates so the
- * pipeline can crop the real frames regardless of display scaling.
+ * Shows a still frame of the recording and lets the user drag a selection box.
+ * Emits the rectangle in *source-pixel* coordinates so the pipeline can crop
+ * the real frames regardless of display scaling.
  */
 export function CropCanvas({
-  file,
+  bitmap,
+  value,
   onCrop,
 }: {
-  file: File;
+  bitmap: ImageBitmap;
+  value: Rect | null;
   onCrop: (rect: Rect) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const drag = useRef<{ x0: number; y0: number } | null>(null);
-  const [box, setBox] = useState<Rect | null>(null);
+  const [box, setBox] = useState<Rect | null>(value);
 
-  // Paint the first decoded frame onto the canvas.
   useEffect(() => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.src = url;
-    video.muted = true;
-    const grab = async () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      setDims({ w: video.videoWidth, h: video.videoHeight });
-      canvas.getContext("2d")!.drawImage(video, 0, 0);
-      URL.revokeObjectURL(url);
-    };
-    video.onloadeddata = () => {
-      video.currentTime = 0.05;
-    };
-    video.onseeked = grab;
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    const canvas = canvasRef.current!;
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
+  }, [bitmap]);
+
+  useEffect(() => setBox(value), [value]);
 
   const toSource = (e: React.PointerEvent): { x: number; y: number } => {
     const canvas = canvasRef.current!;
@@ -57,28 +45,26 @@ export function CropCanvas({
   const onMove = (e: React.PointerEvent) => {
     if (!drag.current) return;
     const p = toSource(e);
-    const r: Rect = {
+    setBox({
       x: Math.min(drag.current.x0, p.x),
       y: Math.min(drag.current.y0, p.y),
       width: Math.abs(p.x - drag.current.x0),
       height: Math.abs(p.y - drag.current.y0),
-    };
-    setBox(r);
+    });
   };
   const onUp = () => {
     drag.current = null;
     if (box && box.width > 4 && box.height > 4) onCrop(box);
   };
 
-  const overlay: React.CSSProperties =
-    box && dims
-      ? {
-          left: `${(box.x / dims.w) * 100}%`,
-          top: `${(box.y / dims.h) * 100}%`,
-          width: `${(box.width / dims.w) * 100}%`,
-          height: `${(box.height / dims.h) * 100}%`,
-        }
-      : { display: "none" };
+  const overlay: React.CSSProperties = box
+    ? {
+        left: `${(box.x / bitmap.width) * 100}%`,
+        top: `${(box.y / bitmap.height) * 100}%`,
+        width: `${(box.width / bitmap.width) * 100}%`,
+        height: `${(box.height / bitmap.height) * 100}%`,
+      }
+    : { display: "none" };
 
   return (
     <div className="cropwrap">
