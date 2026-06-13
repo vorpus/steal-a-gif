@@ -112,20 +112,14 @@ export async function renderGifs(
   );
 
   let looped: Frame[];
-  if (accurate.length >= 2) {
-    // Collapse held duplicates among the full-rate frames, preserving the real
-    // per-frame durations, then pin the last frame's duration so the loop's
-    // total time matches the selected window exactly.
-    const full: Rect = {
-      x: 0,
-      y: 0,
-      width: accurate[0].bitmap.width,
-      height: accurate[0].bitmap.height,
-    };
-    const prints = await fingerprintFrames(accurate, full);
-    looped = dedupeFrames(accurate, prints).frames;
-    const last = looped[looped.length - 1];
-    last.durationUs = Math.max(1, t1Us - last.timestampUs);
+  if (accurate.length >= 1) {
+    // Collapse ONLY held duplicates (a 60fps capture repeats each ~10fps source
+    // frame many times). This biases hard toward keeping frames: it counts how
+    // many pixels actually changed rather than averaging the whole frame, so
+    // genuinely-distinct animation frames are never dropped — that average was
+    // the old "missing frames" bug. Each kept frame gets its real on-screen
+    // duration; the last spans to the window end so loop timing is exact.
+    looped = await collapseHeldDuplicates(accurate, t1Us);
   } else {
     looped = preview.slice(range.start, range.end);
   }
@@ -175,6 +169,59 @@ export async function renderGifs(
     frameCount: looped.length,
     fps: prepared.fps,
   };
+}
+
+/**
+ * Merge runs of essentially-identical consecutive frames (held duplicates from
+ * a high-fps capture of a low-fps animation), accumulating their on-screen
+ * time onto the kept frame. Deliberately conservative: a frame is a duplicate
+ * only if almost no pixels changed beyond a noise floor, so any real motion —
+ * however small in area — keeps the frame.
+ */
+async function collapseHeldDuplicates(
+  frames: Frame[],
+  t1Us: number,
+): Promise<Frame[]> {
+  const SIZE = 32; // fingerprint grid
+  const NOISE = 0.05; // per-pixel change below this (~13/255) is encoder noise
+  const KEEP_FRACTION = 0.001; // changed-pixel fraction above this => distinct
+
+  const prints = frames.map((f) => grayFingerprint(f.bitmap, SIZE));
+  const keptIdx: number[] = [0];
+  for (let i = 1; i < frames.length; i++) {
+    const ref = prints[keptIdx[keptIdx.length - 1]];
+    const cur = prints[i];
+    let changed = 0;
+    for (let p = 0; p < ref.length; p++) {
+      if (Math.abs(ref[p] - cur[p]) > NOISE) changed++;
+    }
+    if (changed / ref.length > KEEP_FRACTION) keptIdx.push(i);
+  }
+
+  return keptIdx.map((idx, k) => {
+    const nextTs =
+      k + 1 < keptIdx.length ? frames[keptIdx[k + 1]].timestampUs : t1Us;
+    return {
+      ...frames[idx],
+      durationUs: Math.max(1, nextTs - frames[idx].timestampUs),
+    };
+  });
+}
+
+function grayFingerprint(bitmap: ImageBitmap, size: number): Float32Array {
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0, size, size);
+  const { data } = ctx.getImageData(0, 0, size, size);
+  const out = new Float32Array(size * size);
+  for (let i = 0; i < out.length; i++) {
+    out[i] =
+      (0.299 * data[i * 4] +
+        0.587 * data[i * 4 + 1] +
+        0.114 * data[i * 4 + 2]) /
+      255;
+  }
+  return out;
 }
 
 function renderFrames(frames: Frame[], crop: Rect): OffscreenCanvas[] {
