@@ -53,16 +53,21 @@ function encodeOnce(
   transparent: boolean,
 ): Uint8Array<ArrayBuffer> {
   const gif = GIFEncoder();
+  const format = transparent ? "rgba4444" : "rgb565";
+
+  // ONE palette for the whole animation. Quantizing each frame independently
+  // gives every frame a slightly different palette, so a constant colour lands
+  // on different entries frame-to-frame and the image shimmers/flashes. A
+  // single shared palette keeps colours stable across the loop. We build it
+  // from an evenly-spaced sample of frames so the colour range is covered
+  // without concatenating every pixel of every frame.
+  const palette = quantize(samplePixels(frames), maxColors, {
+    format,
+    oneBitAlpha: transparent,
+  });
+
   frames.forEach((frame, i) => {
     const delay = delays[i];
-    // With transparency, oneBitAlpha reserves palette index 0 for fully-
-    // transparent pixels so GIF 1-bit transparency keys on our alpha channel.
-    // Without it, encode opaque in rgb565 for better color and no stray holes.
-    const format = transparent ? "rgba4444" : "rgb565";
-    const palette = quantize(frame.data, maxColors, {
-      format,
-      oneBitAlpha: transparent,
-    });
     const index = applyPalette(frame.data, palette, format);
     gif.writeFrame(
       index,
@@ -79,6 +84,28 @@ function encodeOnce(
   const bytes = new Uint8Array(src.byteLength);
   bytes.set(src);
   return bytes;
+}
+
+/**
+ * Concatenate the pixels of an evenly-spaced sample of frames into one RGBA
+ * buffer for global palette quantization. Sampling (rather than every frame)
+ * bounds memory while still covering the loop's full colour range.
+ */
+function samplePixels(frames: ImageData[]): Uint8ClampedArray {
+  const MAX = 16;
+  const count = Math.min(frames.length, MAX);
+  const picks: ImageData[] = [];
+  for (let i = 0; i < count; i++) {
+    picks.push(frames[Math.floor((i * frames.length) / count)]);
+  }
+  const total = picks.reduce((n, f) => n + f.data.length, 0);
+  const out = new Uint8ClampedArray(total);
+  let off = 0;
+  for (const f of picks) {
+    out.set(f.data, off);
+    off += f.data.length;
+  }
+  return out;
 }
 
 function downscale(frame: ImageData, factor: number): ImageData {
