@@ -23,9 +23,21 @@ interface Output {
 }
 
 const SAMPLES = [
-  { src: "WeChat", emoji: "🐻", url: "/samples/wechat.mp4" },
-  { src: "TikTok", emoji: "🐸", url: "/samples/tiktok.mp4" },
-  { src: "iMessage", emoji: "👻", url: "/samples/imessage.mp4" },
+  {
+    src: "TikTok",
+    url: "/samples/tiktok-catfight.MP4",
+    thumb: "/samples/tiktok-catfight.thumb.png",
+  },
+  {
+    src: "XHS",
+    url: "/samples/xhs-smelly.MP4",
+    thumb: "/samples/xhs-smelly.thumb.png",
+  },
+  {
+    src: "YouTube",
+    url: "/samples/yt-snoop.MP4",
+    thumb: "/samples/yt-snoop.thumb.png",
+  },
 ];
 
 const LOAD_MSGS = [
@@ -452,13 +464,19 @@ export function App() {
               this:
               <div className="ba">
                 <div className="tile raw">
-                  <span className="l" style={{ top: 14, width: "60%" }} />
-                  <span className="l" style={{ top: 26, width: "44%" }} />
-                  <span className="stkr">🐻</span>
+                  <img
+                    className="tileimg"
+                    src="/samples/xhs-smelly.before.png"
+                    alt="raw sticker"
+                  />
                 </div>
                 <span className="arrow">→</span>
                 <div className="tile checker">
-                  <span className="stkr">🐻</span>
+                  <img
+                    className="tileimg after"
+                    src="/samples/example-export.gif"
+                    alt="clean sticker"
+                  />
                   <span className="badge">CLEAN</span>
                 </div>
               </div>
@@ -516,8 +534,8 @@ export function App() {
                         className="sample"
                         onClick={() => loadSample(s.url)}
                       >
+                        <img className="samthumb" src={s.thumb} alt={s.src} />
                         <span className="src">{s.src}</span>
-                        <span className="stkr">{s.emoji}</span>
                         <span className="play">▶</span>
                       </button>
                     ))}
