@@ -387,7 +387,12 @@ export function App() {
         className="filein"
         type="file"
         accept="video/*,image/gif"
-        onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          // Reset so picking the SAME file again still fires onChange.
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
       />
 
       {dragging && (
