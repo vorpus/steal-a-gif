@@ -189,7 +189,6 @@ export function LoopSelector({
     <div className="loopselector">
       <div className="preview-wrap">
         <canvas ref={previewRef} className="looppreview" />
-        <span className="preview-tag">PREVIEW · LOW-RES</span>
       </div>
       <div className="scrubber">
         <div
@@ -233,7 +232,7 @@ export function LoopSelector({
           />
         </div>
         <div className="scrubmeta">
-          frames {value.start}–{value.end} ({value.end - value.start} ·{" "}
+          frames {value.start}–{value.end} ({value.end - value.start} frames ·{" "}
           {(selMs / 1000).toFixed(2)}s · {Math.round(1000 / (selMs / Math.max(1, value.end - value.start)))} fps)
         </div>
       </div>

@@ -136,7 +136,10 @@ export function App() {
     try {
       const prepared = await prepareFrames(file);
       setPrep(prepared);
-      setRange(prepared.suggested);
+      // Default the trim to a 10-frame window starting at the suggested loop.
+      const n = prepared.frames.length;
+      const start = Math.min(prepared.suggested.start, Math.max(0, n - 10));
+      setRange({ start, end: Math.min(n, start + 10) });
       setStep("box");
       setEditorOpen(true);
       if (prepared.compat !== "webcodecs") setHevcOpen(true);
@@ -251,10 +254,10 @@ export function App() {
         }
         return {
           key: "original",
-          title: "Original",
+          title: "Full size",
           caption: `${fc.width} × ${fc.height} · ${res.frameCount}f · ${kb(o.bytes)}`,
           url: URL.createObjectURL(o.gif),
-          filename: "steal-a-gif-original.gif",
+          filename: "steal-a-gif-full-size.gif",
         };
       });
       outputsRef.current = next;
@@ -336,7 +339,7 @@ export function App() {
       <Toggle
         on={removeBg}
         title="Remove app background"
-        sub="drop the chat UI, keep the sticker"
+        sub="remove solid color background"
         onClick={() => setRemoveBg((v) => !v)}
       />
       <Toggle
@@ -512,7 +515,6 @@ export function App() {
               <div className="row out">
                 <div className="sticker-out">
                   <img className="box checker" src={slackOut.url} alt="result" />
-                  <span className="badge">≤128KB</span>
                 </div>
               </div>
               <div className="row">
