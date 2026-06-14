@@ -138,9 +138,12 @@ export function App() {
   const [hevcOpen, setHevcOpen] = useState(false);
   const [hevcDismissed, setHevcDismissed] = useState(false);
   const [dragging, setDragging] = useState(false);
-  // If a previous render didn't clear this breadcrumb, the tab was killed
-  // mid-render (out of memory) and reloaded — there's no other OOM signal.
-  const [crashWarn, setCrashWarn] = useState<{ frames: number } | null>(null);
+  // If a breadcrumb is still set on load, the tab was killed (out of memory) and
+  // reloaded mid-decode or mid-render — the only OOM signal we get on iOS.
+  const [crashWarn, setCrashWarn] = useState<{
+    phase: "decode" | "render";
+    frames?: number;
+  } | null>(null);
 
   // landing chat intro
   const [introActive, setIntroActive] = useState(true);
@@ -182,15 +185,14 @@ export function App() {
     [],
   );
 
-  // Detect an out-of-memory tab reload: a render breadcrumb that's still set on
-  // load means the last Make GIF crashed the tab before it could clear it.
+  // Detect an out-of-memory tab reload: a breadcrumb still set on load means the
+  // last decode or render crashed the tab before it could clear it. We only
+  // READ here (clearing happens on dismiss / next run) so React StrictMode's
+  // double-invoked effect can't consume it before the live mount sees it.
   useEffect(() => {
     try {
-      const b = localStorage.getItem("sag:render");
-      if (b) {
-        localStorage.removeItem("sag:render");
-        setCrashWarn(JSON.parse(b));
-      }
+      const b = localStorage.getItem("sag:busy");
+      if (b) setCrashWarn(JSON.parse(b));
     } catch {
       /* storage unavailable */
     }
@@ -240,7 +242,15 @@ export function App() {
     setSent(false);
     setHevcOpen(false);
     setHevcDismissed(false);
+    setCrashWarn(null);
     setPreparing(true);
+    // Breadcrumb: if the tab dies of OOM while decoding ("building your
+    // editor"), this survives the reload so we can flag it on next load.
+    try {
+      localStorage.setItem("sag:busy", JSON.stringify({ phase: "decode" }));
+    } catch {
+      /* storage unavailable */
+    }
     try {
       const prepared = await prepareFrames(file);
       framesRef.current = prepared.frames;
@@ -256,6 +266,11 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setPreparing(false);
+      try {
+        localStorage.removeItem("sag:busy");
+      } catch {
+        /* storage unavailable */
+      }
     }
   }, []);
 
@@ -323,8 +338,8 @@ export function App() {
     // and we detect it on next load (no other signal exists, esp. on iOS).
     try {
       localStorage.setItem(
-        "sag:render",
-        JSON.stringify({ frames: range.end - range.start }),
+        "sag:busy",
+        JSON.stringify({ phase: "render", frames: range.end - range.start }),
       );
     } catch {
       /* storage unavailable */
@@ -386,7 +401,7 @@ export function App() {
     } finally {
       // Render finished (success or error) without crashing — clear breadcrumb.
       try {
-        localStorage.removeItem("sag:render");
+        localStorage.removeItem("sag:busy");
       } catch {
         /* storage unavailable */
       }
@@ -531,14 +546,37 @@ export function App() {
       )}
 
       {crashWarn && (
-        <div className="crashbanner">
-          <span>
-            ⚠ Your last export ({crashWarn.frames} frames) ran out of memory and
-            reloaded the page. Try a <b>tighter box</b> or a <b>shorter loop</b>.
-          </span>
-          <button onClick={() => setCrashWarn(null)} aria-label="dismiss">
-            ✕
-          </button>
+        <div className="modal">
+          <div className="card">
+            <div className="ico">⚠</div>
+            <h3>That clip was too big for this device</h3>
+            {crashWarn.phase === "render" ? (
+              <p>
+                Your last export ({crashWarn.frames} frames) ran out of memory
+                and reloaded the page. Try a <b>tighter box</b> or a{" "}
+                <b>shorter loop</b>.
+              </p>
+            ) : (
+              <p>
+                Loading your last clip ran out of memory and reloaded the page.
+                Try a <b>shorter</b> or <b>lower-resolution</b> recording.
+              </p>
+            )}
+            <button
+              className="primary"
+              style={{ marginTop: 0 }}
+              onClick={() => {
+                setCrashWarn(null);
+                try {
+                  localStorage.removeItem("sag:busy");
+                } catch {
+                  /* storage unavailable */
+                }
+              }}
+            >
+              Got it
+            </button>
+          </div>
         </div>
       )}
 

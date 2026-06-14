@@ -85,33 +85,6 @@ body {
   flex-direction: column;
 }
 
-.crashbanner {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #fff4ed;
-  border-bottom: 1px solid rgba(255, 122, 89, 0.45);
-  color: #9a4a31;
-  padding: 10px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  z-index: 7;
-}
-.crashbanner b {
-  color: var(--pop);
-}
-.crashbanner button {
-  margin-left: auto;
-  flex: none;
-  background: none;
-  border: 0;
-  color: #9a4a31;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
 /* ===================== landing (chat) ===================== */
 .landing {
   flex: 1;
