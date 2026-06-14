@@ -77,7 +77,10 @@ body {
 
 /* ===================== app shell ===================== */
 .app {
-  min-height: 100%;
+  /* Definite height so the thread (flex:1 + overflow) is the scroll container,
+     not the whole page. Without it the body scrolls and the sticky composer
+     floats over — hiding the last message. */
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -85,12 +88,12 @@ body {
 /* ===================== landing (chat) ===================== */
 .landing {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
   position: relative;
-  /* Flat chat surface — without this the messages sit on the body's radial
-     gradient, which shifts colour top-to-bottom as you scroll a long thread. */
+  /* Flat chat surface so messages don't sit on the body's radial gradient,
+     which would shift colour top-to-bottom as you scroll a long thread. */
   background: var(--chat);
 }
 .chead {
@@ -456,8 +459,7 @@ body {
 
 /* composer */
 .composer {
-  position: sticky;
-  bottom: 0;
+  flex: none;
   padding: 12px 14px calc(18px + env(safe-area-inset-bottom));
   background: linear-gradient(transparent, var(--chat) 30%);
   z-index: 6;
