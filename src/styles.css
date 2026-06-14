@@ -176,7 +176,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 11px;
-  padding: 18px 14px 14px;
+  /* Bottom padding clears the absolutely-positioned composer overlay so the
+     resting last message sits above it (only faded once you scroll). */
+  padding: 18px 14px 130px;
   width: 100%;
   max-width: 680px;
 }
@@ -461,16 +463,25 @@ body {
 }
 
 /* composer */
+/* Overlay the bottom of the thread so bubbles scroll BEHIND it and fade into
+   the chat colour (instead of cutting off). The tall transparent->--chat
+   gradient is the fade; pointer-events:none lets touches/scroll pass through to
+   the thread, except on the interactive inner (the drop bar). */
 .composer {
-  flex: none;
-  padding: 12px 14px calc(18px + env(safe-area-inset-bottom));
-  background: linear-gradient(transparent, var(--chat) 30%);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  padding: 46px 14px calc(18px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--chat) 60%, rgba(243, 245, 241, 0));
   z-index: 6;
 }
 .composer .inner {
   width: 100%;
   max-width: 660px;
   margin: 0 auto;
+  pointer-events: auto;
 }
 .dropbar {
   display: flex;
