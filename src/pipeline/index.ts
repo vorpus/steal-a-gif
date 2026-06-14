@@ -130,8 +130,14 @@ export async function renderGifs(
   if (prepared.compat !== "incompatible") {
     onStage?.("extract");
     try {
-      accurate = await extractAccurateRange(prepared.file, t0Us, t1Us, (d, t) =>
-        onStage?.("extract", `${d}/${t}`),
+      // Frames come back ALREADY cropped to the selection (memory: never hold
+      // full-resolution frames). So downstream crop ops use the whole bitmap.
+      accurate = await extractAccurateRange(
+        prepared.file,
+        t0Us,
+        t1Us,
+        crop,
+        (d, t) => onStage?.("extract", `${d}/${t}`),
       );
     } catch (e) {
       console.warn("[steal-a-gif] accurate decode failed; using preview", e);
@@ -139,22 +145,30 @@ export async function renderGifs(
   }
 
   let looped: Frame[];
+  let cropForRender: Rect;
   if (accurate.length >= 1) {
-    // Collapse ONLY held duplicates (a 60fps capture repeats each ~10fps source
-    // frame many times), comparing within the CROP region — the animation —
-    // not the whole frame. Comparing the whole frame lets the large static app
-    // background dilute the sticker's motion, merging genuinely-distinct frames
-    // (the "missing frames" bug). Each kept frame keeps its real on-screen
-    // duration; the last spans to the window end so loop timing is exact.
-    looped = await collapseHeldDuplicates(accurate, t1Us, crop);
+    // Accurate frames are pre-cropped, so the "crop" downstream is the whole
+    // frame. Collapse held duplicates comparing within it (the animation).
+    const local: Rect = {
+      x: 0,
+      y: 0,
+      width: accurate[0].bitmap.width,
+      height: accurate[0].bitmap.height,
+    };
+    looped = await collapseHeldDuplicates(accurate, t1Us, local);
+    cropForRender = local;
     console.info(
       `[steal-a-gif] window ${(t0Us / 1e3).toFixed(0)}–${(t1Us / 1e3).toFixed(0)}ms · ${accurate.length} decoded → ${looped.length} distinct frames`,
     );
   } else {
+    // Fallback: lossy preview frames are full-resolution, so crop to the box.
     looped = preview.slice(range.start, range.end);
+    cropForRender = crop;
   }
 
-  const tight = opts.autoTighten ? await autoCrop(looped, crop) : crop;
+  const tight = opts.autoTighten
+    ? await autoCrop(looped, cropForRender)
+    : cropForRender;
 
   let base = renderFrames(looped, tight).map((c) =>
     c.getContext("2d")!.getImageData(0, 0, c.width, c.height),

@@ -107,6 +107,9 @@ export function App() {
   const outputsRef = useRef<Output[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Holds the current clip's preview frames so we can close their ImageBitmaps
+  // (native memory) when a new clip is loaded, instead of waiting for GC.
+  const framesRef = useRef<{ bitmap: ImageBitmap }[] | null>(null);
   const rendering = stage !== null && stage !== "done";
 
   useEffect(() => {
@@ -124,7 +127,10 @@ export function App() {
   }, []);
 
   useEffect(
-    () => () => outputsRef.current.forEach((o) => URL.revokeObjectURL(o.url)),
+    () => () => {
+      outputsRef.current.forEach((o) => URL.revokeObjectURL(o.url));
+      framesRef.current?.forEach((f) => f.bitmap.close());
+    },
     [],
   );
 
@@ -161,6 +167,9 @@ export function App() {
   const onFile = useCallback(async (file: File) => {
     outputsRef.current.forEach((o) => URL.revokeObjectURL(o.url));
     outputsRef.current = [];
+    // Free the previous clip's preview-frame bitmaps before decoding the next.
+    framesRef.current?.forEach((f) => f.bitmap.close());
+    framesRef.current = null;
     setOutputs([]);
     setError(null);
     setPrep(null);
@@ -172,6 +181,7 @@ export function App() {
     setPreparing(true);
     try {
       const prepared = await prepareFrames(file);
+      framesRef.current = prepared.frames;
       setPrep(prepared);
       // Default the trim to a 10-frame window starting ~5% into the clip.
       const n = prepared.frames.length;
@@ -241,19 +251,16 @@ export function App() {
     };
   }, [onFile]);
 
-  const effectiveCrop: Rect | null = prep
-    ? crop ?? { x: 0, y: 0, width: prep.width, height: prep.height }
-    : null;
-
   const makeGif = useCallback(async () => {
-    if (!prep || !effectiveCrop || !range) return;
+    // A box is mandatory now — no full-frame fallback (keeps decode memory low).
+    if (!prep || !crop || !range) return;
     setError(null);
     setOutputs([]);
     try {
       const res = await renderGifs(
         prep,
         range,
-        effectiveCrop,
+        crop,
         {
           removeBackground: removeBg,
           autoTighten,
@@ -304,7 +311,7 @@ export function App() {
       setError(e instanceof Error ? e.message : String(e));
       setStage(null);
     }
-  }, [prep, effectiveCrop, range, removeBg, autoTighten]);
+  }, [prep, crop, range, removeBg, autoTighten]);
 
   const sendToChat = useCallback(() => {
     setEditorOpen(false);
@@ -349,11 +356,11 @@ export function App() {
     </div>
   );
 
-  const trimArea = prep && effectiveCrop && range && (
+  const trimArea = prep && crop && range && (
     <>
       <LoopSelector
         frames={prep.frames}
-        crop={effectiveCrop}
+        crop={crop}
         fps={prep.fps}
         value={range}
         onChange={setRange}
@@ -640,6 +647,7 @@ export function App() {
             step={step}
             setStep={setStep}
             onClose={closeEditor}
+            hasCrop={!!crop}
             squareToggle={squareToggle}
             cropArea={cropArea}
             trimArea={trimArea}
@@ -707,6 +715,7 @@ function MobileEditor(props: {
   step: Step;
   setStep: (s: Step) => void;
   onClose: () => void;
+  hasCrop: boolean;
   squareToggle: React.ReactNode;
   cropArea: React.ReactNode;
   trimArea: React.ReactNode;
@@ -746,10 +755,16 @@ function MobileEditor(props: {
           <div className="estep entering">
             {props.cropArea}
             <div className="hintline">
-              Drag a box around just the sticker · pinch to resize
+              {props.hasCrop
+                ? "Drag the handles to fine-tune · pinch to resize"
+                : "Drag a box around just the sticker to continue"}
             </div>
             {props.squareToggle}
-            <button className="primary" onClick={() => props.setStep("trim")}>
+            <button
+              className="primary"
+              disabled={!props.hasCrop}
+              onClick={() => props.setStep("trim")}
+            >
               Next · Trim ›
             </button>
           </div>
@@ -838,7 +853,11 @@ function DesktopEditor(props: {
         <div className="deditor-right">
           <div className="panel">
             <p className="ptitle">Trim to one loop</p>
-            {props.trimArea}
+            {props.trimArea ?? (
+              <div className="cap" style={{ textAlign: "left" }}>
+                Draw a box around the sticker on the left to start trimming.
+              </div>
+            )}
           </div>
           <div className="panel">
             <p className="ptitle">Options</p>
@@ -846,7 +865,7 @@ function DesktopEditor(props: {
             <button
               className="primary"
               style={{ marginTop: 12 }}
-              disabled={props.rendering}
+              disabled={props.rendering || !props.crop}
               onClick={props.onMakeGif}
             >
               {props.rendering ? "Working…" : "Make GIF"}

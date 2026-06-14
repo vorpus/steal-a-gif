@@ -1,6 +1,59 @@
 import { createFile, DataStream, MP4BoxBuffer } from "mp4box";
 import type { Movie, Sample } from "mp4box";
-import type { Frame } from "./types";
+import type { Frame, Rect } from "./types";
+
+/**
+ * How to crop+downscale each decoded frame at decode time, so we never hold
+ * full-resolution frames in memory (the mobile OOM cause). `resize*` caps the
+ * crop's edge to bound total memory across the whole window.
+ */
+interface CropSpec {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  resizeW: number;
+  resizeH: number;
+}
+
+function cropSpec(crop: Rect, nFrames: number): CropSpec {
+  // Bound total RGBA bytes across all decoded frames to ~this budget by capping
+  // each frame's longest edge. Small selections keep native resolution; only a
+  // large box or a very long loop gets downscaled.
+  const MEM_BUDGET = 300e6;
+  const cap = Math.max(
+    256,
+    Math.min(1280, Math.floor(Math.sqrt(MEM_BUDGET / (4 * Math.max(1, nFrames))))),
+  );
+  const x = Math.max(0, Math.round(crop.x));
+  const y = Math.max(0, Math.round(crop.y));
+  const w = Math.max(1, Math.round(crop.width));
+  const h = Math.max(1, Math.round(crop.height));
+  const scale = Math.min(1, cap / Math.max(w, h));
+  return {
+    x,
+    y,
+    w,
+    h,
+    resizeW: Math.max(1, Math.round(w * scale)),
+    resizeH: Math.max(1, Math.round(h * scale)),
+  };
+}
+
+/** Crop+resize a frame source to an ImageBitmap (or full frame if no spec). */
+function grab(
+  source: CanvasImageSource,
+  cs?: CropSpec,
+): Promise<ImageBitmap> {
+  if (cs) {
+    return createImageBitmap(source, cs.x, cs.y, cs.w, cs.h, {
+      resizeWidth: cs.resizeW,
+      resizeHeight: cs.resizeH,
+      resizeQuality: "high",
+    });
+  }
+  return createImageBitmap(source);
+}
 
 /**
  * Decoding has two modes:
@@ -113,6 +166,7 @@ export async function extractAccurateRange(
   file: File,
   t0Us: number,
   t1Us: number,
+  crop: Rect,
   onProgress?: (done: number, total: number) => void,
 ): Promise<Frame[]> {
   let demuxed: Demuxed;
@@ -129,6 +183,10 @@ export async function extractAccurateRange(
     .sort((a, b) => a.ctsUs - b.ctsUs);
   if (picks.length === 0) return [];
 
+  // Crop+cap each frame to the selection at decode time so we never hold
+  // full-resolution frames (the mobile out-of-memory cause).
+  const cs = cropSpec(crop, picks.length);
+
   // Prefer WebCodecs when this browser can actually decode the codec.
   if (typeof VideoDecoder !== "undefined") {
     const support = await VideoDecoder.isConfigSupported(config).catch(() => ({
@@ -136,9 +194,9 @@ export async function extractAccurateRange(
     }));
     if (support.supported) {
       try {
-        const frames = await decodeWindowWebCodecs(config, samples, t0Us, t1Us);
+        const frames = await decodeWindowWebCodecs(config, samples, t0Us, t1Us, cs);
         console.info(
-          `[steal-a-gif] accurate decode: WebCodecs · codec=${config.codec} · ${picks.length} samples in window → ${frames.length} frames`,
+          `[steal-a-gif] accurate decode: WebCodecs · codec=${config.codec} · ${picks.length} samples → ${frames.length} frames @ ${cs.resizeW}×${cs.resizeH}`,
         );
         return frames;
       } catch (e) {
@@ -153,9 +211,9 @@ export async function extractAccurateRange(
 
   // Universal fallback: slow-playback capture (handles HEVC, doesn't depend on
   // flaky per-seek precision).
-  const frames = await extractBySlowPlay(file, t0Us, t1Us, picks.length, onProgress);
+  const frames = await extractBySlowPlay(file, t0Us, t1Us, picks.length, onProgress, cs);
   console.info(
-    `[steal-a-gif] accurate decode: slow-play · ${picks.length} samples in window → ${frames.length} frames`,
+    `[steal-a-gif] accurate decode: slow-play · ${picks.length} samples → ${frames.length} frames @ ${cs.resizeW}×${cs.resizeH}`,
   );
   return frames;
 }
@@ -165,6 +223,7 @@ async function decodeWindowWebCodecs(
   samples: DemuxSample[],
   t0Us: number,
   t1Us: number,
+  cs: CropSpec,
 ): Promise<Frame[]> {
   // Feed through the last sample presenting before t1. Feed from sample 0 (the
   // initial IDR with full parameter sets) rather than a mid-stream keyframe —
@@ -182,7 +241,7 @@ async function decodeWindowWebCodecs(
       const ts = frame.timestamp;
       if (ts >= t0Us && ts < t1Us) {
         pending.push(
-          createImageBitmap(frame)
+          grab(frame, cs)
             .then((bitmap) => {
               frames.push({ bitmap, timestampUs: ts });
             })
@@ -230,6 +289,7 @@ async function extractBySlowPlay(
   t1Us: number,
   totalEstimate: number,
   onProgress?: (done: number, total: number) => void,
+  cs?: CropSpec,
 ): Promise<Frame[]> {
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
@@ -307,7 +367,7 @@ async function extractBySlowPlay(
         }
         if (tUs > lastTsUs && tUs >= t0Us) {
           lastTsUs = tUs;
-          const bitmap = await createImageBitmap(video);
+          const bitmap = await grab(video, cs);
           frames.push({ bitmap, timestampUs: tUs });
           onProgress?.(frames.length, totalEstimate);
           arm();
