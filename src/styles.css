@@ -160,27 +160,30 @@ body {
    when it's shorter than the viewport. This avoids the flexbox scroll bug where
    justify-content:flex-end / margin-top:auto makes overflowed content
    unreachable. */
+/* The scroll container is a PLAIN BLOCK (no flex, no anchoring). A block
+   scrolling a taller block child can't hit the flexbox "overflowed top is
+   unreachable" bug — this is the stable structure. The bottom-anchoring lives
+   entirely on the inner flex element below. */
 .thread {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  scroll-behavior: smooth;
-  display: flex;
-  flex-direction: column;
 }
-/* margin-top:auto bottom-anchors the conversation when it's shorter than the
-   thread, and collapses to 0 when it overflows — and unlike
-   justify-content:flex-end it does NOT make the overflowed top unscrollable. */
 .thread-inner {
-  margin: auto auto 0;
+  /* min-height:100% + justify-content:flex-end bottom-anchors the conversation
+     when it's shorter than the thread; when it overflows there's no free space
+     so the block .thread scrolls it normally. */
+  min-height: 100%;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 11px;
   /* Bottom padding clears the absolutely-positioned composer overlay so the
      resting last message sits above it (only faded once you scroll). */
   padding: 18px 14px 130px;
   width: 100%;
   max-width: 680px;
+  margin: 0 auto;
 }
 .time {
   align-self: center;

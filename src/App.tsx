@@ -122,12 +122,10 @@ export function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, []);
   useEffect(() => {
+    // One instant scroll on the next frame (result GIF also re-scrolls onLoad).
+    // Instant + single-shot so it can't fight a user scroll moments later.
     const r = requestAnimationFrame(scrollToBottom);
-    const t = setTimeout(scrollToBottom, 240);
-    return () => {
-      cancelAnimationFrame(r);
-      clearTimeout(t);
-    };
+    return () => cancelAnimationFrame(r);
   }, [samplesOpen, sent, introFinal, scrollToBottom]);
 
   // cycle the loading copy while decoding
