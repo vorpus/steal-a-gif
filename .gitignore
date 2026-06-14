@@ -5,3 +5,6 @@ dist-ssr
 .DS_Store
 .vite
 *.log
+
+# Local headless Chrome downloaded for screenshot verification
+chrome

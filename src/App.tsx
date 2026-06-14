@@ -555,6 +555,7 @@ export function App() {
               className="github-button"
               href="https://github.com/vorpus/steal-a-gif"
               data-icon="octicon-star"
+              data-size="large"
               data-show-count="true"
               aria-label="Star vorpus/steal-a-gif on GitHub"
             >
