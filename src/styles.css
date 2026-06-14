@@ -136,8 +136,9 @@ body {
 
 .thread {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 18px 14px 150px;
+  padding: 18px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 11px;
@@ -145,6 +146,11 @@ body {
   width: 100%;
   max-width: 680px;
   margin: 0 auto;
+}
+/* Anchor the conversation to the bottom (just above the composer). When the
+   thread overflows, the auto-margin collapses to 0 so normal scrolling works. */
+.thread > .time:first-child {
+  margin-top: auto;
 }
 .time {
   align-self: center;
