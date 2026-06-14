@@ -40,17 +40,35 @@ function cropSpec(crop: Rect, nFrames: number): CropSpec {
   };
 }
 
-/** Crop+resize a frame source to an ImageBitmap (or full frame if no spec). */
+function makeCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
+  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c;
+}
+
+/**
+ * Crop+resize a frame source to an ImageBitmap (or full frame if no spec).
+ *
+ * We crop with `drawImage` onto a small canvas — NOT `createImageBitmap`'s
+ * crop/resize options. Safari silently ignores those options and returns the
+ * whole frame, which both shows the full recording and keeps full-resolution
+ * frames in memory (the mobile OOM). `drawImage` honours the crop everywhere.
+ * The full source frame is drawn synchronously and can be closed immediately.
+ */
 function grab(
   source: CanvasImageSource,
   cs?: CropSpec,
 ): Promise<ImageBitmap> {
   if (cs) {
-    return createImageBitmap(source, cs.x, cs.y, cs.w, cs.h, {
-      resizeWidth: cs.resizeW,
-      resizeHeight: cs.resizeH,
-      resizeQuality: "high",
-    });
+    const canvas = makeCanvas(cs.resizeW, cs.resizeH);
+    const ctx = canvas.getContext("2d") as
+      | OffscreenCanvasRenderingContext2D
+      | CanvasRenderingContext2D;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(source, cs.x, cs.y, cs.w, cs.h, 0, 0, cs.resizeW, cs.resizeH);
+    return createImageBitmap(canvas);
   }
   return createImageBitmap(source);
 }
@@ -240,16 +258,15 @@ async function decodeWindowWebCodecs(
     output: (frame) => {
       const ts = frame.timestamp;
       if (ts >= t0Us && ts < t1Us) {
+        // grab() draws the crop synchronously, so the full frame can be closed
+        // immediately — we never hold full-resolution frames.
         pending.push(
-          grab(frame, cs)
-            .then((bitmap) => {
-              frames.push({ bitmap, timestampUs: ts });
-            })
-            .finally(() => frame.close()),
+          grab(frame, cs).then((bitmap) => {
+            frames.push({ bitmap, timestampUs: ts });
+          }),
         );
-      } else {
-        frame.close();
       }
+      frame.close();
     },
     error: (e) => console.warn("VideoDecoder error", e),
   });
