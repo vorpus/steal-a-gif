@@ -1,6 +1,6 @@
 // Generate the social share card (Open Graph / Twitter) for steal-a-gif.
 // Renders an SVG -> public/og.png (1200x630) and public/og-square.png
-// (1200x1200) with @resvg/resvg-js — no headless browser needed.
+// (1200x1200) with @resvg/resvg-js, no headless browser needed.
 //
 //   node scripts/og-card.cjs
 //
@@ -146,7 +146,7 @@ function landscape() {
   </g>
   <g font-family="Nunito" font-weight="600" fill="${C.soft}" font-size="27">
     <text x="84" y="406">Screen-record a sticker from iMessage,</text>
-    <text x="84" y="444">TikTok or XHS — get back a clean,</text>
+    <text x="84" y="444">TikTok or XHS, and get back a clean,</text>
     <text x="84" y="482">transparent GIF. All in your browser.</text>
   </g>
   ${pill(84, 524)}
@@ -170,7 +170,7 @@ function square() {
   ${demo(600, 700, 320)}
   <g font-family="Nunito" font-weight="600" fill="${C.soft}" font-size="34" text-anchor="middle">
     <text x="600" y="990">Screen-record it. Get back a clean,</text>
-    <text x="600" y="1036">transparent GIF — all in your browser.</text>
+    <text x="600" y="1036">transparent GIF, all in your browser.</text>
   </g>
   <g transform="translate(430,1086)">${pill(0, 0)}</g>
 </svg>`;
