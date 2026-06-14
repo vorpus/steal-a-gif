@@ -115,13 +115,11 @@ export function App() {
   // scroll-behavior:smooth, so assigning scrollTop animates. We fire on the
   // next frame and again after the fly-in/image settles.
   const scrollToBottom = useCallback(() => {
-    // Sentinel scrollIntoView is robust to which element actually scrolls and
-    // to scrollHeight not being settled yet; fall back to scrollTop.
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
-    } else if (threadRef.current) {
-      threadRef.current.scrollTop = threadRef.current.scrollHeight;
-    }
+    // scrollHeight includes the thread's bottom padding (which clears the
+    // composer overlay), so this lands the last message ABOVE the overlay —
+    // unlike scrollIntoView on the sentinel, which stops above that padding.
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, []);
   useEffect(() => {
     const r = requestAnimationFrame(scrollToBottom);
