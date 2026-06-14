@@ -358,7 +358,7 @@ export function App() {
     outputs.length > 0 && (
       <>
         {outputs.map((o) => (
-          <div className="out" key={o.key}>
+          <div className="outcard" key={o.key}>
             <img className="th checker dark" src={o.url} alt={o.title} />
             <div className="meta2">
               <div className="otitle">
