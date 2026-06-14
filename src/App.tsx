@@ -110,14 +110,21 @@ export function App() {
   );
 
   // Keep the newest messages in view when content is appended to the thread
-  // (asking for examples reveals samples; sending drops the result in).
-  useEffect(() => {
+  // (examples reveal, result send, intro completing). .thread has CSS
+  // scroll-behavior:smooth, so assigning scrollTop animates. We fire on the
+  // next frame and again after the fly-in/image settles.
+  const scrollToBottom = useCallback(() => {
     const el = threadRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    });
-  }, [samplesOpen, sent, introFinal]);
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+  useEffect(() => {
+    const r = requestAnimationFrame(scrollToBottom);
+    const t = setTimeout(scrollToBottom, 240);
+    return () => {
+      cancelAnimationFrame(r);
+      clearTimeout(t);
+    };
+  }, [samplesOpen, sent, introFinal, scrollToBottom]);
 
   // cycle the loading copy while decoding
   useEffect(() => {
@@ -522,7 +529,12 @@ export function App() {
             <div className="result play">
               <div className="row out">
                 <div className="sticker-out">
-                  <img className="box checker" src={slackOut.url} alt="result" />
+                  <img
+                    className="box checker"
+                    src={slackOut.url}
+                    alt="result"
+                    onLoad={scrollToBottom}
+                  />
                 </div>
               </div>
               <div className="row">
