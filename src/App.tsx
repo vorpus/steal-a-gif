@@ -13,6 +13,15 @@ import { LoopSelector, type LoopRange } from "./ui/LoopSelector";
 
 type Step = "box" | "trim" | "export";
 
+// buttons.github.io exposes this global once buttons.js has loaded.
+declare global {
+  interface Window {
+    GitHubButton?: { render: (callback?: () => void) => void };
+  }
+}
+
+const GH_BUTTONS_SRC = "https://buttons.github.io/buttons.js";
+
 interface Output {
   key: "original" | "slack";
   title: string;
@@ -66,6 +75,39 @@ function useIsDesktop() {
   return desktop;
 }
 
+// buttons.js scans the DOM for `.github-button` anchors exactly once, when it
+// first loads. React mounts the star anchor after that scan (and again when we
+// navigate back to the landing view), so the anchor would otherwise be left as
+// plain text. This hook calls GitHubButton.render() to force a rescan on every
+// mount — loading the script first (and polling for the global) if needed.
+function useGithubButtonRender() {
+  useEffect(() => {
+    let interval: number | undefined;
+
+    if (window.GitHubButton?.render) {
+      // Script already loaded — just rescan the freshly mounted anchor.
+      window.GitHubButton.render();
+    } else {
+      if (!document.querySelector(`script[src="${GH_BUTTONS_SRC}"]`)) {
+        const s = document.createElement("script");
+        s.src = GH_BUTTONS_SRC;
+        s.async = true;
+        document.body.appendChild(s);
+      }
+      interval = window.setInterval(() => {
+        if (window.GitHubButton?.render) {
+          window.clearInterval(interval);
+          window.GitHubButton.render();
+        }
+      }, 80);
+    }
+
+    return () => {
+      if (interval) window.clearInterval(interval);
+    };
+  }, []);
+}
+
 function scaleToEdge(r: Rect, edge: number) {
   const s = Math.min(1, edge / Math.max(r.width, r.height));
   return { w: Math.round(r.width * s), h: Math.round(r.height * s) };
@@ -74,6 +116,7 @@ const kb = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
 
 export function App() {
   const isDesktop = useIsDesktop();
+  useGithubButtonRender();
 
   const [prep, setPrep] = useState<Prepared | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -507,7 +550,17 @@ export function App() {
             <div className="who">steal-a-gif</div>
             <div className="stat">no receipts · grab &amp; go</div>
           </div>
-          <div className="more">⋯</div>
+          <div className="ghstar">
+            <a
+              className="github-button"
+              href="https://github.com/vorpus/steal-a-gif"
+              data-icon="octicon-star"
+              data-show-count="true"
+              aria-label="Star vorpus/steal-a-gif on GitHub"
+            >
+              Star
+            </a>
+          </div>
         </div>
 
         <div className="thread" ref={threadRef}>

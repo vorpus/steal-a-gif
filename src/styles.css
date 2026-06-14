@@ -175,11 +175,10 @@ body {
   70% { box-shadow: 0 0 0 7px rgba(22, 192, 121, 0); }
   100% { box-shadow: 0 0 0 0 rgba(22, 192, 121, 0); }
 }
-.more {
+.ghstar {
   margin-left: auto;
-  color: var(--ink-faint);
-  font-size: 20px;
-  font-weight: 800;
+  display: flex;
+  align-items: center;
 }
 
 /* Outer = plain block scroll container (so scrolling to the top of overflow
