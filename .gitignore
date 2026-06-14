@@ -5,3 +5,6 @@ dist-ssr
 .DS_Store
 .vite
 *.log
+
+# fetched at build time by scripts/og-card.cjs
+scripts/.fonts/
