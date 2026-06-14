@@ -187,7 +187,10 @@ export function LoopSelector({
 
   return (
     <div className="loopselector">
-      <canvas ref={previewRef} className="looppreview" />
+      <div className="preview-wrap">
+        <canvas ref={previewRef} className="looppreview" />
+        <span className="preview-tag">PREVIEW · LOW-RES</span>
+      </div>
       <div className="scrubber">
         <div
           ref={wrapRef}
