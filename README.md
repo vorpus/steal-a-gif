@@ -22,7 +22,7 @@ distinct frames + suggested range
    ▼
 range + crop
    │  decode.ts        ACCURATE: re-decode just the chosen time window —
-   │                   WebCodecs (H.264) or seek the <video> per frame (HEVC)
+   │                   WebCodecs (H.264) or slow-play the <video> + rVFC (HEVC)
    │  autoCrop.ts      (optional) per-pixel motion map → tighten the box
    │  bgKey.ts         (optional) flood-fill the flat app background from edges
    ▼
@@ -40,10 +40,13 @@ a live preview to confirm the loop is seamless.
 **Two-pass decode.** Preview/scrubbing use a fast real-time capture where
 dropped frames don't matter. Only when you hit *Make GIF* does it re-decode the
 trimmed window at full fidelity. That render path tries WebCodecs first, but
-falls back to seeking the `<video>` element frame-by-frame — which uses the
-browser's *native* decode, so HEVC screen recordings (what iPhones produce, and
-which most Chrome builds can't decode via WebCodecs) still come out complete and
-at the right speed.
+falls back to playing the `<video>` element back at 0.25× and capturing each
+frame it presents (per-frame *seeking* proved unreliable — Safari blob seeks
+return stale frames). The fallback uses the browser's *native* decode, so HEVC
+screen recordings (what iPhones produce, and which most Chrome builds can't
+decode via WebCodecs) still come out complete and at the right speed. If even
+the `<video>` element can't decode the clip (e.g. HEVC in Firefox), the render
+degrades to the lossy preview frames instead of failing.
 
 ### The interesting bits
 
@@ -52,7 +55,9 @@ at the right speed.
   frames (16×16 grayscale) and collapse near-identical runs, recovering the
   GIF's true frame sequence and cadence. The scrubber then shows distinct
   frames, not a wall of duplicates. `detectLoop` still scores a suggested
-  range (coverage minus seam error), but it's only a starting point.
+  range — it picks the period that maximizes coverage minus how cleanly the
+  window repeats, then the start offset with the smoothest seam — but it's only
+  a starting point.
 - **Auto-crop** (`src/pipeline/autoCrop.ts`) — inside the rough box, static app
   chrome doesn't change between frames but the animation does. We take the
   per-pixel variance across the loop and bound the moving region. This both
@@ -63,11 +68,14 @@ at the right speed.
   high-contrast prop), we flood-fill the background inward from the frame
   border. It only removes pixels connected to the edge, so an interior outline
   that's close in color to the background never gets eaten, and the constant
-  seed color means no per-frame flicker. AI matting (`removeBackground.ts`,
-  @imgly ISNet) is kept for the harder case of non-flat backgrounds (TikTok).
+  seed color means no per-frame flicker. Flood-fill is the only background
+  remover wired into the pipeline today; an AI-matting module
+  (`removeBackground.ts`, @imgly ISNet) exists for the harder case of non-flat
+  backgrounds (TikTok) but isn't hooked up yet — see the roadmap.
 - **Size budget** (`src/pipeline/encodeGif.ts`) — GIF's 256-color palette and
-  Slack's 128KB ceiling are the real constraints. The encoder shrinks palette,
-  then resolution, until it fits.
+  Slack's 128KB ceiling are the real constraints. The encoder shrinks resolution
+  first (down to a 72px floor), then drops palette colors, until it fits — a
+  coarser palette flashes more than a smaller image, so resolution goes first.
 
 ## Getting started
 
@@ -79,9 +87,9 @@ npm run dev
 Open the printed URL, choose a screen recording, drag a box around the
 animation, and hit **Make GIF**.
 
-> The default background removal (flood-fill) is pure JS/canvas and needs no
-> GPU or model download. The optional AI matting path needs a WebGPU-capable
-> browser (Chrome/Edge 113+).
+> Background removal (flood-fill) is pure JS/canvas and needs no GPU or model
+> download. The AI matting path (not yet wired into the app — see roadmap) would
+> need a WebGPU-capable browser (Chrome/Edge 113+).
 
 ## Status / roadmap
 
@@ -93,8 +101,11 @@ animation, and hit **Make GIF**.
 - [x] WebCodecs decode (every coded frame; `<video>` + rVFC is the fallback)
 - [x] Real per-frame timing (GIF uses source cadence, not a guessed fps)
 - [ ] GIF input support (WebCodecs can't decode GIF; needs a GIF demuxer)
+- [ ] Wire the AI-matting path (`removeBackground.ts`, @imgly ISNet) into the
+      pipeline for non-flat backgrounds (TikTok) — built but not yet hooked up;
+      today only the flood-fill keyer (`bgKey.ts`) runs
 - [ ] Temporal smoothing / swap ISNet for **Robust Video Matting** to kill
-      per-frame edge flicker
+      per-frame edge flicker once AI matting is wired in
 - [ ] APNG / WebP export (smaller + truecolor) alongside GIF
 
 ## Why this is feasible
