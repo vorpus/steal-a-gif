@@ -95,6 +95,9 @@ export function App() {
   const [hevcOpen, setHevcOpen] = useState(false);
   const [hevcDismissed, setHevcDismissed] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // If a previous render didn't clear this breadcrumb, the tab was killed
+  // mid-render (out of memory) and reloaded — there's no other OOM signal.
+  const [crashWarn, setCrashWarn] = useState<{ frames: number } | null>(null);
 
   // landing chat intro
   const [introActive, setIntroActive] = useState(true);
@@ -133,6 +136,20 @@ export function App() {
     },
     [],
   );
+
+  // Detect an out-of-memory tab reload: a render breadcrumb that's still set on
+  // load means the last Make GIF crashed the tab before it could clear it.
+  useEffect(() => {
+    try {
+      const b = localStorage.getItem("sag:render");
+      if (b) {
+        localStorage.removeItem("sag:render");
+        setCrashWarn(JSON.parse(b));
+      }
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
 
   // Keep the newest messages in view when content is appended to the thread
   // (examples reveal, result send, intro completing). .thread has CSS
@@ -256,6 +273,17 @@ export function App() {
     if (!prep || !crop || !range) return;
     setError(null);
     setOutputs([]);
+    setCrashWarn(null);
+    // Breadcrumb: if the tab dies of OOM mid-render, this survives the reload
+    // and we detect it on next load (no other signal exists, esp. on iOS).
+    try {
+      localStorage.setItem(
+        "sag:render",
+        JSON.stringify({ frames: range.end - range.start }),
+      );
+    } catch {
+      /* storage unavailable */
+    }
     try {
       const res = await renderGifs(
         prep,
@@ -310,6 +338,13 @@ export function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage(null);
+    } finally {
+      // Render finished (success or error) without crashing — clear breadcrumb.
+      try {
+        localStorage.removeItem("sag:render");
+      } catch {
+        /* storage unavailable */
+      }
     }
   }, [prep, crop, range, removeBg, autoTighten]);
 
@@ -447,6 +482,18 @@ export function App() {
       {dragging && (
         <div className="scrim">
           <div className="scrim-msg">Drop your recording anywhere</div>
+        </div>
+      )}
+
+      {crashWarn && (
+        <div className="crashbanner">
+          <span>
+            ⚠ Your last export ({crashWarn.frames} frames) ran out of memory and
+            reloaded the page. Try a <b>tighter box</b> or a <b>shorter loop</b>.
+          </span>
+          <button onClick={() => setCrashWarn(null)} aria-label="dismiss">
+            ✕
+          </button>
         </div>
       )}
 

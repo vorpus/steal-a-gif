@@ -144,9 +144,10 @@ export async function renderGifs(
     }
   }
 
+  const fromAccurate = accurate.length >= 1;
   let looped: Frame[];
   let cropForRender: Rect;
-  if (accurate.length >= 1) {
+  if (fromAccurate) {
     // Accurate frames are pre-cropped, so the "crop" downstream is the whole
     // frame. Collapse held duplicates comparing within it (the animation).
     const local: Rect = {
@@ -170,9 +171,9 @@ export async function renderGifs(
     ? await autoCrop(looped, cropForRender)
     : cropForRender;
 
-  let base = renderFrames(looped, tight).map((c) =>
-    c.getContext("2d")!.getImageData(0, 0, c.width, c.height),
-  );
+  // Close the accurate (render-only) bitmaps as we convert them; never close
+  // the preview fallback frames (the editor still owns those).
+  let base = renderFrames(looped, tight, fromAccurate);
 
   if (opts.removeBackground) {
     onStage?.("background");
@@ -285,15 +286,28 @@ function grayFingerprint(
   return out;
 }
 
-function renderFrames(frames: Frame[], crop: Rect): OffscreenCanvas[] {
+/**
+ * Crop each frame to `crop` and return ImageData, reusing ONE canvas. When
+ * `closeBitmaps` is set (the accurate, render-only frames), each source bitmap
+ * is closed right after it's converted — so we never hold the decoded bitmaps
+ * AND their ImageData copies at the same time (halves peak memory).
+ */
+function renderFrames(
+  frames: Frame[],
+  crop: Rect,
+  closeBitmaps: boolean,
+): ImageData[] {
   const w = Math.max(1, Math.round(crop.width));
   const h = Math.max(1, Math.round(crop.height));
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.imageSmoothingQuality = "high";
   return frames.map((f) => {
-    const c = new OffscreenCanvas(w, h);
-    const ctx = c.getContext("2d")!;
-    ctx.imageSmoothingQuality = "high";
+    ctx.clearRect(0, 0, w, h);
     ctx.drawImage(f.bitmap, crop.x, crop.y, crop.width, crop.height, 0, 0, w, h);
-    return c;
+    const data = ctx.getImageData(0, 0, w, h);
+    if (closeBitmaps) f.bitmap.close();
+    return data;
   });
 }
 

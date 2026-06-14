@@ -19,8 +19,11 @@ interface CropSpec {
 function cropSpec(crop: Rect, nFrames: number): CropSpec {
   // Bound total RGBA bytes across all decoded frames to ~this budget by capping
   // each frame's longest edge. Small selections keep native resolution; only a
-  // large box or a very long loop gets downscaled.
-  const MEM_BUDGET = 300e6;
+  // large box or a very long loop gets downscaled. The budget adapts to the
+  // device's RAM where reported (Chrome/Android); Safari doesn't report it, so
+  // we assume a conservative phone.
+  const dm = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const MEM_BUDGET = dm ? Math.max(120e6, Math.min(300e6, dm * 36e6)) : 150e6;
   const cap = Math.max(
     256,
     Math.min(1280, Math.floor(Math.sqrt(MEM_BUDGET / (4 * Math.max(1, nFrames))))),
