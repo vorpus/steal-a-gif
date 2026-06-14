@@ -1,4 +1,8 @@
 :root {
+  /* Opt out of the browser's auto-dark-mode (which otherwise darkens the light
+     chat and paints dark boxes behind the bubbles). We theme dark/light
+     surfaces ourselves with explicit colours. */
+  color-scheme: light;
   --bg: #e7e9e4;
   --chat: #f3f5f1;
   --bub: #ffffff;
