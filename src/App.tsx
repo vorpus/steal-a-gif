@@ -600,8 +600,8 @@ export function App() {
           <div className="row">
             <div className="av-s">🫳</div>
             <div className="bub">
-              Yep - keep that cute sticker from iMessage, TikTok, XHS, wherever.
-              Background gone, ready to drop into your other chats ✨
+              Yep. Background gone, edges clean. Works on iMessage, TikTok,
+              XHS, wherever - paste it into any chat ✨
             </div>
           </div>
 
@@ -619,7 +619,7 @@ export function App() {
             <>
               <div className="row introup">
                 <div className="av-s">🫳</div>
-                <div className="bub">Go ahead - drop a clip below 👇</div>
+                <div className="bub">Go on then - drop a clip below 👇</div>
               </div>
               {!samplesOpen && (
                 <div className="row out introup">
@@ -638,7 +638,7 @@ export function App() {
               <div className="row">
                 <div className="av-s">🫳</div>
                 <div className="bub">
-                  i gotchu fam 🤝 tap one to try it:
+                  On it 🫡 pick one:
                   <div className="samrow">
                     {SAMPLES.map((s) => (
                       <button
