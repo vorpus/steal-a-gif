@@ -409,7 +409,8 @@ export function App() {
           <div className="more">⋯</div>
         </div>
 
-        <div className={`thread ${introActive ? "intro" : ""}`} ref={threadRef}>
+        <div className="thread" ref={threadRef}>
+         <div className={`thread-inner ${introActive ? "intro" : ""}`}>
           <div className="time">TODAY</div>
           <div className="row">
             <div className="av-s">🫳</div>
@@ -524,6 +525,7 @@ export function App() {
               </div>
             </div>
           )}
+         </div>
         </div>
 
         <div className="composer">
