@@ -432,7 +432,8 @@ export function App() {
           <div className="row">
             <div className="av-s">🫳</div>
             <div className="bub">
-              Drop a screen recording and I'll pull it out clean — like this:
+              Upload a screen recording and I'll pull the animation out - like
+              this:
               <div className="ba">
                 <div className="tile raw">
                   <span className="l" style={{ top: 14, width: "60%" }} />
@@ -453,8 +454,8 @@ export function App() {
           <div className="row">
             <div className="av-s">🫳</div>
             <div className="bub">
-              Yep — chat bubbles gone, real frame rate kept. Export full size or
-              a <span className="pillbadge">≤128KB</span> Slack emoji.
+              Yep - keep that cute sticker from iMessage, TikTok, XHS, wherever.
+              Background gone, ready to drop into your other chats ✨
             </div>
           </div>
 
@@ -472,7 +473,7 @@ export function App() {
             <>
               <div className="row">
                 <div className="av-s">🫳</div>
-                <div className="bub">Go ahead — drop a clip below 👇</div>
+                <div className="bub">Go ahead - drop a clip below 👇</div>
               </div>
               {!samplesOpen && (
                 <div className="row out">
@@ -491,7 +492,7 @@ export function App() {
               <div className="row">
                 <div className="av-s">🫳</div>
                 <div className="bub">
-                  i gotchu fam 🤝 — tap one to try it:
+                  i gotchu fam 🤝 tap one to try it:
                   <div className="samrow">
                     {SAMPLES.map((s) => (
                       <button
