@@ -40,6 +40,8 @@ function cropSpec(crop: Rect, nFrames: number): CropSpec {
   };
 }
 
+type Canvas2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
 function makeCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
   if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
   const c = document.createElement("canvas");
@@ -49,28 +51,28 @@ function makeCanvas(w: number, h: number): OffscreenCanvas | HTMLCanvasElement {
 }
 
 /**
- * Crop+resize a frame source to an ImageBitmap (or full frame if no spec).
+ * Crop+resize a frame to a small ImageBitmap, reliably across browsers.
  *
- * We crop with `drawImage` onto a small canvas — NOT `createImageBitmap`'s
- * crop/resize options. Safari silently ignores those options and returns the
- * whole frame, which both shows the full recording and keeps full-resolution
- * frames in memory (the mobile OOM). `drawImage` honours the crop everywhere.
- * The full source frame is drawn synchronously and can be closed immediately.
+ * We must NOT crop a VideoFrame (or createImageBitmap options) directly:
+ * Safari ignores the source rectangle and gives back the WHOLE frame (the
+ * "entire image squished into a square" + still-OOM bug). Drawing a *canvas*
+ * with a source rect IS honoured everywhere, so: draw the full frame onto a
+ * reused full-size canvas (no source crop), then crop FROM that canvas. The
+ * one full canvas is the only full-resolution buffer we keep.
  */
-function grab(
+function cropFromFull(
+  full: { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: Canvas2D },
   source: CanvasImageSource,
-  cs?: CropSpec,
+  srcW: number,
+  srcH: number,
+  cs: CropSpec,
 ): Promise<ImageBitmap> {
-  if (cs) {
-    const canvas = makeCanvas(cs.resizeW, cs.resizeH);
-    const ctx = canvas.getContext("2d") as
-      | OffscreenCanvasRenderingContext2D
-      | CanvasRenderingContext2D;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(source, cs.x, cs.y, cs.w, cs.h, 0, 0, cs.resizeW, cs.resizeH);
-    return createImageBitmap(canvas);
-  }
-  return createImageBitmap(source);
+  full.ctx.drawImage(source, 0, 0, srcW, srcH);
+  const small = makeCanvas(cs.resizeW, cs.resizeH);
+  const sctx = small.getContext("2d") as Canvas2D;
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(full.canvas, cs.x, cs.y, cs.w, cs.h, 0, 0, cs.resizeW, cs.resizeH);
+  return createImageBitmap(small);
 }
 
 /**
@@ -254,16 +256,23 @@ async function decodeWindowWebCodecs(
 
   const frames: Frame[] = [];
   const pending: Promise<void>[] = [];
+  let full: { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: Canvas2D } | null =
+    null;
   const decoder = new VideoDecoder({
     output: (frame) => {
       const ts = frame.timestamp;
       if (ts >= t0Us && ts < t1Us) {
-        // grab() draws the crop synchronously, so the full frame can be closed
-        // immediately — we never hold full-resolution frames.
+        if (!full) {
+          const canvas = makeCanvas(frame.displayWidth, frame.displayHeight);
+          full = { canvas, ctx: canvas.getContext("2d") as Canvas2D };
+        }
+        // cropFromFull draws the frame synchronously, so close it immediately.
         pending.push(
-          grab(frame, cs).then((bitmap) => {
-            frames.push({ bitmap, timestampUs: ts });
-          }),
+          cropFromFull(full, frame, frame.displayWidth, frame.displayHeight, cs).then(
+            (bitmap) => {
+              frames.push({ bitmap, timestampUs: ts });
+            },
+          ),
         );
       }
       frame.close();
@@ -355,6 +364,8 @@ async function extractBySlowPlay(
     const frames: Frame[] = [];
     let lastTsUs = -1;
     video.playbackRate = 0.25;
+    let full: { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: Canvas2D } | null =
+      null;
 
     await new Promise<void>((resolve, reject) => {
       // Watchdog: if no new frame arrives for a while the decoder has stalled
@@ -384,7 +395,16 @@ async function extractBySlowPlay(
         }
         if (tUs > lastTsUs && tUs >= t0Us) {
           lastTsUs = tUs;
-          const bitmap = await grab(video, cs);
+          let bitmap: ImageBitmap;
+          if (cs) {
+            if (!full) {
+              const c = makeCanvas(video.videoWidth, video.videoHeight);
+              full = { canvas: c, ctx: c.getContext("2d") as Canvas2D };
+            }
+            bitmap = await cropFromFull(full, video, video.videoWidth, video.videoHeight, cs);
+          } else {
+            bitmap = await createImageBitmap(video);
+          }
           frames.push({ bitmap, timestampUs: tUs });
           onProgress?.(frames.length, totalEstimate);
           arm();
