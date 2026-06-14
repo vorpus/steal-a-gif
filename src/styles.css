@@ -74,6 +74,9 @@ body {
   flex-direction: column;
   min-height: 100vh;
   position: relative;
+  /* Flat chat surface — without this the messages sit on the body's radial
+     gradient, which shifts colour top-to-bottom as you scroll a long thread. */
+  background: var(--chat);
 }
 .chead {
   flex: none;
