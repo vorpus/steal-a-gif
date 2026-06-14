@@ -101,6 +101,9 @@ export function App() {
 
   // landing chat intro
   const [introActive, setIntroActive] = useState(true);
+  // Start the typing tease on first paint so it rides in with the staggered
+  // intro messages — it reads as the other side already typing on page load.
+  const [introTyping, setIntroTyping] = useState(true);
   const [introFinal, setIntroFinal] = useState(false);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [sent, setSent] = useState(false);
@@ -115,10 +118,12 @@ export function App() {
   const rendering = stage !== null && stage !== "done";
 
   useEffect(() => {
-    // Reveal the closing "drop a clip below" message after the same delay the
-    // fake typing indicator used to run for, but let it fade in like the rest
-    // of the intro messages instead of teasing a typing bubble first.
-    const b = setTimeout(() => setIntroFinal(true), 2100);
+    // After the tease, swap the typing dots for the closing "drop a clip below"
+    // message. Keep the original 2100ms delay so the timing is unchanged.
+    const b = setTimeout(() => {
+      setIntroTyping(false);
+      setIntroFinal(true);
+    }, 2100);
     const c = setTimeout(() => setIntroActive(false), 1700);
     return () => {
       clearTimeout(b);
@@ -547,6 +552,16 @@ export function App() {
             </div>
           </div>
 
+          {introTyping && (
+            <div className="row">
+              <div className="av-s">🫳</div>
+              <div className="typing">
+                <i />
+                <i />
+                <i />
+              </div>
+            </div>
+          )}
           {introFinal && (
             <>
               <div className="row introup">

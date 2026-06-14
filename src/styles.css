@@ -348,8 +348,34 @@ body {
 .thread-inner.intro > *:nth-child(5) { animation-delay: 0.46s; }
 .thread-inner.intro > *:nth-child(6) { animation-delay: 0.58s; }
 
-/* Closing intro message fades in on the same delay the typing tease used to
-   run, matching the staggered entrance of the messages above it. */
+/* typing indicator — rides in with the staggered intro messages so it looks
+   like the other side is already typing when the page loads. */
+.typing {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  background: var(--bub);
+  border: 1px solid var(--bub-line);
+  border-radius: 20px 20px 20px 6px;
+  padding: 14px 16px;
+  box-shadow: var(--sh-s);
+}
+.typing i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c4c8c2;
+  animation: blink 1.3s infinite;
+}
+.typing i:nth-child(2) { animation-delay: 0.18s; }
+.typing i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes blink {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* Closing intro message fades in on the same delay, matching the staggered
+   entrance of the messages above it. */
 .row.introup { animation: msgIn 0.5s both; }
 .row.out.introup { animation-delay: 0.12s; }
 
