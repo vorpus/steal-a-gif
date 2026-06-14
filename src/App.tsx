@@ -101,7 +101,6 @@ export function App() {
 
   // landing chat intro
   const [introActive, setIntroActive] = useState(true);
-  const [introTyping, setIntroTyping] = useState(false);
   const [introFinal, setIntroFinal] = useState(false);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [sent, setSent] = useState(false);
@@ -116,14 +115,12 @@ export function App() {
   const rendering = stage !== null && stage !== "done";
 
   useEffect(() => {
-    const a = setTimeout(() => setIntroTyping(true), 900);
-    const b = setTimeout(() => {
-      setIntroTyping(false);
-      setIntroFinal(true);
-    }, 2100);
+    // Reveal the closing "drop a clip below" message after the same delay the
+    // fake typing indicator used to run for, but let it fade in like the rest
+    // of the intro messages instead of teasing a typing bubble first.
+    const b = setTimeout(() => setIntroFinal(true), 2100);
     const c = setTimeout(() => setIntroActive(false), 1700);
     return () => {
-      clearTimeout(a);
       clearTimeout(b);
       clearTimeout(c);
     };
@@ -503,9 +500,7 @@ export function App() {
           <div className="av">🫳</div>
           <div>
             <div className="who">steal-a-gif</div>
-            <div className="stat">
-              <span className="dot" /> online · no signup
-            </div>
+            <div className="stat">no receipts · grab &amp; go</div>
           </div>
           <div className="more">⋯</div>
         </div>
@@ -552,24 +547,14 @@ export function App() {
             </div>
           </div>
 
-          {introTyping && (
-            <div className="row">
-              <div className="av-s">🫳</div>
-              <div className="typing">
-                <i />
-                <i />
-                <i />
-              </div>
-            </div>
-          )}
           {introFinal && (
             <>
-              <div className="row">
+              <div className="row introup">
                 <div className="av-s">🫳</div>
                 <div className="bub">Go ahead - drop a clip below 👇</div>
               </div>
               {!samplesOpen && (
-                <div className="row out">
+                <div className="row out introup">
                   <button className="ghost" onClick={() => setSamplesOpen(true)}>
                     Got an example recording I can use?
                   </button>
