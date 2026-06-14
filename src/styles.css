@@ -165,17 +165,20 @@ body {
   min-height: 0;
   overflow-y: auto;
   scroll-behavior: smooth;
-}
-.thread-inner {
-  min-height: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+}
+/* margin-top:auto bottom-anchors the conversation when it's shorter than the
+   thread, and collapses to 0 when it overflows — and unlike
+   justify-content:flex-end it does NOT make the overflowed top unscrollable. */
+.thread-inner {
+  margin: auto auto 0;
+  display: flex;
+  flex-direction: column;
   gap: 11px;
   padding: 18px 14px 14px;
   width: 100%;
   max-width: 680px;
-  margin: 0 auto;
 }
 .time {
   align-self: center;
