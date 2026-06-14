@@ -88,6 +88,7 @@ export function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const outputsRef = useRef<Output[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const rendering = stage !== null && stage !== "done";
 
   useEffect(() => {
@@ -114,8 +115,13 @@ export function App() {
   // scroll-behavior:smooth, so assigning scrollTop animates. We fire on the
   // next frame and again after the fly-in/image settles.
   const scrollToBottom = useCallback(() => {
-    const el = threadRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    // Sentinel scrollIntoView is robust to which element actually scrolls and
+    // to scrollHeight not being settled yet; fall back to scrollTop.
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+    } else if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight;
+    }
   }, []);
   useEffect(() => {
     const r = requestAnimationFrame(scrollToBottom);
@@ -557,6 +563,7 @@ export function App() {
               </div>
             </div>
           )}
+          <div ref={bottomRef} />
          </div>
         </div>
 
