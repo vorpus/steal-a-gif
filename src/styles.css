@@ -27,6 +27,17 @@
 
 * {
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  font-family: inherit;
+}
+button:focus {
+  outline: none;
+}
+button:focus-visible {
+  outline: 2px solid var(--mint);
+  outline-offset: 2px;
 }
 html,
 body,
@@ -274,13 +285,17 @@ body {
   from { opacity: 0; transform: translateY(14px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.thread-inner.intro > .row {
+/* Stagger by nth-CHILD (not nth-of-type) so the leading .time div doesn't
+   throw off the indexing — messages fade in strictly top-to-bottom. */
+.thread-inner.intro > * {
   animation: msgIn 0.5s both;
 }
-.thread-inner.intro > .row:nth-of-type(1) { animation-delay: 0.05s; }
-.thread-inner.intro > .row:nth-of-type(2) { animation-delay: 0.18s; }
-.thread-inner.intro > .row:nth-of-type(3) { animation-delay: 0.34s; }
-.thread-inner.intro > .row:nth-of-type(4) { animation-delay: 0.5s; }
+.thread-inner.intro > *:nth-child(1) { animation-delay: 0s; }
+.thread-inner.intro > *:nth-child(2) { animation-delay: 0.1s; }
+.thread-inner.intro > *:nth-child(3) { animation-delay: 0.22s; }
+.thread-inner.intro > *:nth-child(4) { animation-delay: 0.34s; }
+.thread-inner.intro > *:nth-child(5) { animation-delay: 0.46s; }
+.thread-inner.intro > *:nth-child(6) { animation-delay: 0.58s; }
 
 /* typing indicator */
 .typing {
@@ -379,6 +394,12 @@ body {
   justify-content: center;
   font-size: 9px;
   padding-left: 1px;
+}
+.samples,
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
 }
 .samples.play > .row.out {
   animation: flyIn 0.5s cubic-bezier(0.2, 1.3, 0.4, 1) both;
