@@ -109,6 +109,16 @@ export function App() {
     [],
   );
 
+  // Keep the newest messages in view when content is appended to the thread
+  // (asking for examples reveals samples; sending drops the result in).
+  useEffect(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [samplesOpen, sent, introFinal]);
+
   // cycle the loading copy while decoding
   useEffect(() => {
     if (!preparing) return;
@@ -272,10 +282,7 @@ export function App() {
   const sendToChat = useCallback(() => {
     setEditorOpen(false);
     setSent(true);
-    requestAnimationFrame(() => {
-      if (threadRef.current)
-        threadRef.current.scrollTop = threadRef.current.scrollHeight;
-    });
+    // Scroll handled by the thread-bottom effect on `sent`.
   }, []);
 
   const closeEditor = useCallback(() => setEditorOpen(false), []);
