@@ -231,7 +231,12 @@ export function App() {
           setStageDetail(d ?? "");
         },
       );
-      const fc = res.finalCrop;
+      const fc = {
+        x: res.finalCrop.x,
+        y: res.finalCrop.y,
+        width: Math.round(res.finalCrop.width),
+        height: Math.round(res.finalCrop.height),
+      };
       const slackDim = scaleToEdge(fc, SLACK_EMOJI_EDGE);
       const next: Output[] = res.outputs.map((o) => {
         if (o.label === "slack") {

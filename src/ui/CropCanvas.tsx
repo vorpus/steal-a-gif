@@ -14,9 +14,11 @@ type Drag =
   | { kind: "resize"; handle: Handle };
 
 /**
- * Crop selector with draggable corner/edge handles and an optional square
- * lock. Sizes itself to fit the parent box (so the whole tool fits one
- * viewport) and emits the rectangle in *source-pixel* coordinates.
+ * Crop selector with draggable handles, an optional square lock, and a
+ * view/zoom: after drawing a small box the canvas zooms to frame it so it's
+ * easy to fine-tune, with a Fit button to return to the whole recording.
+ * Coordinates are kept in source pixels; only the visible `view` window
+ * changes when zoomed.
  */
 export function CropCanvas({
   bitmap,
@@ -32,44 +34,68 @@ export function CropCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  const lastBox = useRef<Rect | null>(null);
   const [disp, setDisp] = useState<{ w: number; h: number } | null>(null);
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const W = bitmap.width;
   const H = bitmap.height;
+  const [view, setView] = useState<Rect>({ x: 0, y: 0, width: W, height: H });
+  const fullView =
+    view.x === 0 && view.y === 0 && view.width === W && view.height === H;
 
+  // Reset the view when the clip changes or the box is cleared.
   useEffect(() => {
-    const canvas = canvasRef.current!;
-    canvas.width = W;
-    canvas.height = H;
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-  }, [bitmap, W, H]);
+    setView({ x: 0, y: 0, width: W, height: H });
+  }, [W, H]);
+  useEffect(() => {
+    if (!value) setView({ x: 0, y: 0, width: W, height: H });
+  }, [value, W, H]);
 
-  // Fit the displayed canvas inside the available parent area, preserving
-  // aspect. Measured in JS so the wrapper exactly matches the drawn canvas
-  // (the crop overlay math depends on wrapper rect == canvas rect).
+  // Fit the displayed canvas (of the current view's aspect) into the parent.
   useLayoutEffect(() => {
     const parent = wrapRef.current!.parentElement!;
     const fit = () => {
       const aw = parent.clientWidth;
       const ah = parent.clientHeight;
       if (!aw || !ah) return;
-      const scale = Math.min(aw / W, ah / H);
+      const scale = Math.min(aw / view.width, ah / view.height);
       setDisp({
-        w: Math.max(1, Math.floor(W * scale)),
-        h: Math.max(1, Math.floor(H * scale)),
+        w: Math.max(1, Math.floor(view.width * scale)),
+        h: Math.max(1, Math.floor(view.height * scale)),
       });
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(parent);
     return () => ro.disconnect();
-  }, [W, H]);
+  }, [view, W, H]);
+
+  // Paint the current view region of the recording.
+  useEffect(() => {
+    if (!disp) return;
+    const canvas = canvasRef.current!;
+    canvas.width = disp.w;
+    canvas.height = disp.h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(
+      bitmap,
+      view.x,
+      view.y,
+      view.width,
+      view.height,
+      0,
+      0,
+      disp.w,
+      disp.h,
+    );
+  }, [bitmap, view, disp]);
 
   const toSource = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect();
     return {
-      x: ((clientX - rect.left) / rect.width) * W,
-      y: ((clientY - rect.top) / rect.height) * H,
+      x: view.x + ((clientX - rect.left) / rect.width) * view.width,
+      y: view.y + ((clientY - rect.top) / rect.height) * view.height,
     };
   };
 
@@ -126,6 +152,20 @@ export function CropCanvas({
     }
   };
 
+  const zoomToBox = (b: Rect) => {
+    // Frame the box so it fills ~half the view (padding ≈ 50% per side).
+    const padX = b.width * 0.5;
+    const padY = b.height * 0.5;
+    const vx = Math.max(0, b.x - padX);
+    const vy = Math.max(0, b.y - padY);
+    setView({
+      x: vx,
+      y: vy,
+      width: Math.min(W - vx, b.width + padX * 2),
+      height: Math.min(H - vy, b.height + padY * 2),
+    });
+  };
+
   const beginDrag = (d: Drag) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -135,37 +175,43 @@ export function CropCanvas({
       if (!drag.current) return;
       const p = toSource(ev.clientX, ev.clientY);
       const cur = drag.current;
-      if (cur.kind === "draw") {
-        onCrop(clamp(fromAnchor(cur.x0, cur.y0, p.x, p.y)));
-      } else if (cur.kind === "move") {
-        onCrop(
-          clamp({
-            x: p.x - cur.offX,
-            y: p.y - cur.offY,
-            width: value!.width,
-            height: value!.height,
-          }),
-        );
-      } else {
-        onCrop(clamp(resize(cur.handle, p.x, p.y)));
-      }
+      let next: Rect;
+      if (cur.kind === "draw") next = clamp(fromAnchor(cur.x0, cur.y0, p.x, p.y));
+      else if (cur.kind === "move")
+        next = clamp({
+          x: p.x - cur.offX,
+          y: p.y - cur.offY,
+          width: value!.width,
+          height: value!.height,
+        });
+      else next = clamp(resize(cur.handle, p.x, p.y));
+      lastBox.current = next;
+      onCrop(next);
     };
     const onUp = () => {
+      const wasDraw = drag.current?.kind === "draw";
       drag.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      // Auto-zoom a freshly-drawn small box (only from the full view).
+      const b = lastBox.current;
+      if (wasDraw && fullView && b) {
+        const small = Math.max(b.width, b.height) < 0.4 * Math.max(W, H);
+        if (small && b.width > 8 && b.height > 8) zoomToBox(b);
+      }
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
 
-  const pct = (n: number, total: number) => `${(n / total) * 100}%`;
+  const pct = (n: number, origin: number, span: number) =>
+    `${((n - origin) / span) * 100}%`;
   const overlay: React.CSSProperties = value
     ? {
-        left: pct(value.x, W),
-        top: pct(value.y, H),
-        width: pct(value.width, W),
-        height: pct(value.height, H),
+        left: pct(value.x, view.x, view.width),
+        top: pct(value.y, view.y, view.height),
+        width: pct(value.width, 0, view.width),
+        height: pct(value.height, 0, view.height),
       }
     : { display: "none" };
 
@@ -183,7 +229,7 @@ export function CropCanvas({
 
   return (
     <div
-      className="cropwrap"
+      className={`cropwrap ${value ? "clipped" : ""}`}
       ref={wrapRef}
       style={disp ? { width: disp.w, height: disp.h } : undefined}
     >
@@ -207,6 +253,15 @@ export function CropCanvas({
         <div className="crophint" style={{ left: hover.x, top: hover.y }}>
           drag to select animation
         </div>
+      )}
+
+      {!fullView && (
+        <button
+          className="fitbtn"
+          onClick={() => setView({ x: 0, y: 0, width: W, height: H })}
+        >
+          ⤢ Fit
+        </button>
       )}
 
       {value && (
