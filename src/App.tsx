@@ -510,9 +510,12 @@ export function App() {
                 {o.slack && <span className="badge">≤128KB</span>}
               </div>
               <div className="ocap">{o.caption}</div>
-              <a className="dlbtn" href={o.url} download={o.filename}>
-                ↓ Download
-              </a>
+              <div className="outbtns">
+                <a className="dlbtn" href={o.url} download={o.filename}>
+                  ↓ Download
+                </a>
+                <CopyButton url={o.url} />
+              </div>
             </div>
           </div>
         ))}
@@ -816,6 +819,76 @@ export function App() {
         </div>
       )}
     </main>
+  );
+}
+
+// Draw the GIF's first frame to a PNG. Used as a clipboard fallback for the
+// many browsers that refuse to put `image/gif` on the clipboard.
+async function gifToPng(gif: Blob): Promise<Blob> {
+  const bmp = await createImageBitmap(gif);
+  const canvas = document.createElement("canvas");
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  canvas.getContext("2d")?.drawImage(bmp, 0, 0);
+  bmp.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+      "image/png",
+    ),
+  );
+}
+
+// Copies the rendered GIF to the clipboard. We try the real `image/gif` bytes
+// first (so it pastes animated where supported), then fall back to a PNG of the
+// first frame, which every clipboard-capable browser accepts. Passing the blob
+// as a promise to ClipboardItem keeps Safari's user-gesture token alive across
+// the async fetch.
+function CopyButton({ url }: { url: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "error">("idle");
+  const timer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const flash = (s: "copied" | "error") => {
+    setState(s);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setState("idle"), 1600);
+  };
+
+  const onCopy = useCallback(async () => {
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
+        throw new Error("clipboard unavailable");
+      const gif = fetch(url).then((r) => r.blob());
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/gif": gif }),
+        ]);
+      } catch {
+        // Browser won't accept image/gif — copy a static PNG instead.
+        const png = await gifToPng(await gif);
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": png }),
+        ]);
+      }
+      flash("copied");
+    } catch {
+      flash("error");
+    }
+  }, [url]);
+
+  const label =
+    state === "copied"
+      ? "✓ Copied"
+      : state === "error"
+        ? "Copy failed"
+        : "⧉ Copy";
+
+  return (
+    <button type="button" className={`copybtn ${state}`} onClick={onCopy}>
+      {label}
+    </button>
   );
 }
 

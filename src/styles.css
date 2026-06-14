@@ -1096,6 +1096,43 @@ body {
 }
 .dlbtn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 .dlbtn:active { transform: scale(0.96); }
+.outbtns {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.outbtns .dlbtn { margin-top: 0; }
+.copybtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--round);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid var(--dark-line);
+  cursor: pointer;
+  background: transparent;
+  color: var(--d-soft);
+  transition: 0.14s;
+}
+.copybtn:hover {
+  border-color: var(--mint);
+  color: var(--mint);
+  transform: translateY(-1px);
+}
+.copybtn:active { transform: scale(0.96); }
+.copybtn.copied {
+  background: var(--mint);
+  border-color: var(--mint);
+  color: var(--mint-ink);
+}
+.copybtn.error {
+  border-color: var(--pop);
+  color: var(--pop);
+}
 .badge {
   background: var(--pop);
   color: #fff;
