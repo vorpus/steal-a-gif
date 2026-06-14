@@ -458,7 +458,7 @@ export function App() {
         ))}
         {withSend && (
           <button className="primary" onClick={sendToChat}>
-            Drop it back in the chat ›
+            back to chat ›
           </button>
         )}
       </>
@@ -537,7 +537,6 @@ export function App() {
                     src={asset("samples/example-export.gif")}
                     alt="clean sticker"
                   />
-                  <span className="badge">CLEAN</span>
                 </div>
               </div>
             </div>

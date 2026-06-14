@@ -1014,17 +1014,29 @@ body {
   touch-action: none;
 }
 .selection:active { cursor: grabbing; }
+/* The element is a wide, transparent touch target (easy to grab on mobile);
+   the visible mint bar is drawn by ::before, centred inside it. */
 .handle {
   position: absolute;
   top: 50%;
+  width: 34px;
+  height: 54px;
+  transform: translate(-50%, -50%);
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: 9px;
   height: 28px;
   border-radius: 5px;
   background: var(--mint);
-  transform: translate(-50%, -50%);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-  cursor: ew-resize;
-  touch-action: none;
 }
 .scrubmeta {
   font-family: var(--mono);
