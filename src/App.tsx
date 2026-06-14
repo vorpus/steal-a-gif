@@ -22,21 +22,27 @@ interface Output {
   slack?: boolean;
 }
 
+// BASE_URL is "/" in dev and "/steal-a-gif/" in the GitHub Pages build, so
+// these resolve correctly in both. The videos are served from the same Pages
+// origin (no CORS).
+const BASE = import.meta.env.BASE_URL;
+const asset = (p: string) => `${BASE}${p}`;
+
 const SAMPLES = [
   {
     src: "TikTok",
-    url: "/samples/tiktok-catfight.MP4",
-    thumb: "/samples/tiktok-catfight.thumb.png",
+    url: asset("samples/tiktok-catfight.MP4"),
+    thumb: asset("samples/tiktok-catfight.thumb.png"),
   },
   {
     src: "XHS",
-    url: "/samples/xhs-smelly.MP4",
-    thumb: "/samples/xhs-smelly.thumb.png",
+    url: asset("samples/xhs-smelly.MP4"),
+    thumb: asset("samples/xhs-smelly.thumb.png"),
   },
   {
     src: "YouTube",
-    url: "/samples/yt-snoop.MP4",
-    thumb: "/samples/yt-snoop.thumb.png",
+    url: asset("samples/yt-snoop.MP4"),
+    thumb: asset("samples/yt-snoop.thumb.png"),
   },
 ];
 
@@ -167,9 +173,9 @@ export function App() {
     try {
       const prepared = await prepareFrames(file);
       setPrep(prepared);
-      // Default the trim to a 10-frame window starting at the suggested loop.
+      // Default the trim to a 10-frame window starting ~5% into the clip.
       const n = prepared.frames.length;
-      const start = Math.min(prepared.suggested.start, Math.max(0, n - 10));
+      const start = Math.min(Math.round(n * 0.05), Math.max(0, n - 10));
       setRange({ start, end: Math.min(n, start + 10) });
       setStep("box");
       setEditorOpen(true);
@@ -466,7 +472,7 @@ export function App() {
                 <div className="tile raw">
                   <img
                     className="tileimg"
-                    src="/samples/xhs-smelly.before.png"
+                    src={asset("samples/xhs-smelly.before.png")}
                     alt="raw sticker"
                   />
                 </div>
@@ -474,7 +480,7 @@ export function App() {
                 <div className="tile checker">
                   <img
                     className="tileimg after"
-                    src="/samples/example-export.gif"
+                    src={asset("samples/example-export.gif")}
                     alt="clean sticker"
                   />
                   <span className="badge">CLEAN</span>
