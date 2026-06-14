@@ -549,19 +549,12 @@ export function App() {
         <div className="modal">
           <div className="card">
             <div className="ico">⚠</div>
-            <h3>That clip was too big for this device</h3>
-            {crashWarn.phase === "render" ? (
-              <p>
-                Your last export ({crashWarn.frames} frames) ran out of memory
-                and reloaded the page. Try a <b>tighter box</b> or a{" "}
-                <b>shorter loop</b>.
-              </p>
-            ) : (
-              <p>
-                Loading your last clip ran out of memory and reloaded the page.
-                Try a <b>shorter</b> or <b>lower-resolution</b> recording.
-              </p>
-            )}
+            <h3>Out of memory</h3>
+            <p>
+              Your device ran out of memory and killed this app. Try a{" "}
+              <b>shorter</b> or <b>lower-resolution</b> recording.
+            </p>
+            <p>Running the app on a computer can also work!</p>
             <button
               className="primary"
               style={{ marginTop: 0 }}
