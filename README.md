@@ -15,7 +15,7 @@
 
 ---
 
-Screen-record a WeChat sticker, TikTok loop, or Xiaohongshu animation, and `steal-a-gif` turns it into a tidy GIF: trimmed to a seamless loop, cropped to the animation, background removed, small enough for Slack's 128KB emoji cap.
+Screen-record a WeChat sticker, TikTok loop, or XHS animation, and `steal-a-gif` turns it into a tidy GIF: trimmed to a seamless loop, cropped to the animation, background removed, small enough for Slack's 128KB emoji cap.
 
 Runs entirely in your browser. No upload, no server, no account.
 
