@@ -1,16 +1,34 @@
-# steal-a-gif
+<h1 align="center">steal-a-gif</h1>
 
-**That animation you can't download? Screen-record it, and steal it back as a clean GIF — right in your browser.**
+<p align="center">
+  Some app won't let you save its animation? Screen-record it and steal it
+  back as a clean GIF.
+</p>
 
-WeChat stickers, TikTok loops, Xiaohongshu animations — platforms love to show you something delightful and then refuse to let you save it. `steal-a-gif` turns a throwaway screen recording into a tidy, downloadable GIF: trimmed to a seamless loop, cropped to the animation, background knocked out, and sized to fit even Slack's 128KB emoji cap.
+<p align="center">
+  <a href="https://vorpus.github.io/steal-a-gif/"><b>Live demo</b></a>
+  ·
+  <a href="https://github.com/vorpus/steal-a-gif"><b>GitHub</b></a>
+  ·
+  <a href="OVERVIEW.md"><b>How it works</b></a>
+</p>
 
-Everything runs **100% client-side**. Your recording never leaves your machine — no upload, no server, no per-image cost, no account.
+<p align="center">
+  <img alt="build" src="https://img.shields.io/badge/build-passing-brightgreen" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" />
+  <img alt="server" src="https://img.shields.io/badge/server-none-blue" />
+  <img alt="uploads" src="https://img.shields.io/badge/uploads-zero-success" />
+  <img alt="vibes" src="https://img.shields.io/badge/vibes-immaculate-ff1493" />
+</p>
 
-### 👉 [Try it now — vorpus.github.io/steal-a-gif](https://vorpus.github.io/steal-a-gif/)
+---
+
+WeChat stickers, TikTok loops, Xiaohongshu animations. Platforms love showing you something nice and then greying out the save button. `steal-a-gif` takes the screen recording you grabbed in revenge and turns it into a tidy GIF: trimmed to a seamless loop, cropped to the animation, background knocked out, sized small enough for even Slack's 128KB emoji cap.
+
+It all runs in your browser. The recording never leaves your machine. No upload, no server, no account, no per-image bill.
 
 ## Install
-
-Run it locally in three lines:
 
 ```bash
 git clone https://github.com/vorpus/steal-a-gif.git
@@ -19,25 +37,25 @@ npm install
 npm run dev
 ```
 
-Open the printed URL, choose a screen recording, drag a box around the animation, and hit **Make GIF**. That's it.
+Open the printed URL, pick a screen recording, drag a box around the animation, hit **Make GIF**. Done.
 
 ## The hard problems, already solved
 
-Pulling a clean GIF out of a screen recording sounds simple. It isn't. Here's what's already working under the hood:
+The annoying parts of turning a screen recording into a GIF, handled:
 
-- **🔁 Loop detection from a 60fps capture.** A 60fps recording of a ~10fps GIF repeats every frame ~6×. We fingerprint frames, collapse the duplicates, recover the GIF's true cadence, and suggest a seamless loop range — then hand you a live looping preview so you own the final call.
-- **✂️ Auto-crop to the real animation.** Static app chrome doesn't move between frames; the animation does. A per-pixel variance map across the loop bounds exactly the moving region, stripping dead background and recovering the GIF's true size.
-- **🎬 Two-pass, codec-proof decoding.** Fast lossy capture for scrubbing; a full-fidelity re-decode only when you hit *Make GIF*. WebCodecs (H.264) where it's available, with a native-`<video>` slow-play fallback so HEVC iPhone recordings — which most Chrome builds can't touch — still come out complete and at the right speed.
-- **🪄 Flicker-free background removal.** Sticker apps draw on a flat, connected background. Instead of AI matting (which happily drops a stylized character while keeping a high-contrast prop), we flood-fill inward from the frame edge: interior outlines survive, and a constant seed color means zero per-frame flicker.
-- **📦 Fit-to-budget encoding.** GIF's 256-color palette and Slack's 128KB ceiling are the real enemies. The encoder shrinks resolution first (down to a 72px floor), then trims palette colors, until it fits — because a coarse palette flashes worse than a smaller image.
+- **Loop detection.** A 60fps recording of a 10fps GIF repeats every frame six-ish times. We fingerprint frames, collapse the duplicates, recover the real cadence, and suggest a seamless loop. You confirm it against a live looping preview.
+- **Auto-crop.** App chrome holds still, the animation doesn't. A per-pixel variance map across the loop finds exactly the part that moves and crops to it.
+- **Codec-proof decode.** WebCodecs where it works, native `<video>` slow-play where it doesn't, so the HEVC recordings your iPhone makes (the ones most Chrome builds choke on) still come out complete and at the right speed.
+- **Background removal that doesn't flicker.** Sticker apps draw on a flat background, so we flood-fill in from the edges instead of asking an AI model which pixels are the "subject" (it always picks wrong). Interior outlines survive, nothing flickers frame to frame.
+- **Fit-to-budget encoding.** GIF gets 256 colors and Slack gets 128KB. The encoder drops resolution first, then palette, until it fits, because a chunky palette looks worse than a slightly smaller image.
 
-Want the full architecture and the rationale behind each decision? See **[OVERVIEW.md](OVERVIEW.md)**.
+The deep version of all this lives in [OVERVIEW.md](OVERVIEW.md).
 
 ## Contributing
 
-We'd love help. These are the problems we hit and haven't licked yet — grab one:
+PRs welcome. Here's the stuff that still bites us, if you want a fight:
 
-- [ ] **Can't tell if we're close to the auto-kill memory limit of mobile devices.** Big recordings decoded frame-by-frame can balloon memory, and mobile browsers silently kill the tab with no warning. We need a way to estimate how close we are to the ceiling and degrade gracefully before the OS pulls the plug.
-- [ ] **Some browsers can't support all filetypes.** HEVC in Firefox, GIF input anywhere (WebCodecs won't demux it), WebGPU-only matting paths — codec and feature support is a patchwork. We need clearer detection and fallbacks so users aren't met with a silent failure.
+- [ ] **We can't tell when we're about to hit a phone's auto-kill memory limit.** Decode a big recording frame by frame on mobile and the browser quietly executes the tab, no warning. We need to guess how close to the ceiling we are and back off before the OS does it for us.
+- [ ] **Browsers don't all support the same filetypes.** HEVC in Firefox, GIF as input anywhere, WebGPU-only matting paths. The support matrix is swiss cheese and right now the failures are mostly silent. We need real detection and graceful fallbacks.
 
-See **[OVERVIEW.md](OVERVIEW.md)** for the broader roadmap (AI matting for non-flat backgrounds, APNG/WebP export, temporal smoothing, and more).
+More on the roadmap (AI matting for messy backgrounds, APNG/WebP export, temporal smoothing) over in [OVERVIEW.md](OVERVIEW.md).
