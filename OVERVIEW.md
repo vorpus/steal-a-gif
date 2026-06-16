@@ -108,6 +108,46 @@ animation, and hit **Make GIF**.
       per-frame edge flicker once AI matting is wired in
 - [ ] APNG / WebP export (smaller + truecolor) alongside GIF
 
+### Known limitations & harder problems
+
+The open problems we hit but haven't fully solved — these are the meaty ones:
+
+- **Mobile out-of-memory on long/large exports.** Make GIF can still crash the
+  tab (iOS Safari especially — the OS Jetsam killer reloads the page) on long
+  loops or large crops. We bounded a lot (crop each frame at decode time, an
+  adaptive per-frame resolution cap, freeing bitmaps as they're consumed), but
+  two consumers stay unbounded: the **preview frames are held full-resolution**
+  (downscaling them needs a preview→source crop-coordinate scale factor), and
+  the **encoder holds every frame's `ImageData` at once** plus re-encodes in the
+  byte-budget loop (it should *stream*: build the global palette from a sample,
+  then encode and release frame-by-frame). There is **no pre-crash memory signal
+  on iOS** — no memory API, and the OOM kill fires no catchable event — so today
+  we only detect the reload *after the fact* via a `localStorage` breadcrumb and
+  warn the user. A streaming encoder + bounded preview frames are the real fix.
+- **Residual color & edge flicker.** A single global 256-color palette stopped
+  the per-frame palette shimmer, but GIF's 256-color + 1-bit transparency still
+  bands on colorful content, and HEVC compression noise can push pixels across
+  palette buckets when the palette is squeezed to fit the 128KB Slack cap.
+  Per-frame *independent* background matting also flickers at the edges.
+  Temporal smoothing / Robust Video Matting (above) and APNG/WebP export (which
+  sidesteps the palette and hard-alpha limits) are the paths forward.
+- **Non-deterministic preview decode.** The fast preview capture (play +
+  `requestVideoFrameCallback`) drops frames under load and yields a *different
+  frame count run-to-run*. That's why loop selections are index-based and why we
+  can't safely free and re-create preview frames mid-session. A deterministic
+  preview (e.g. WebCodecs at reduced resolution) would fix both.
+- **Rotated recordings.** The preview `<video>` applies the clip's rotation
+  metadata, but a WebCodecs `VideoFrame` is unrotated — so a clip with a
+  rotation matrix can crop the wrong region. We don't yet read track rotation
+  and apply it when cropping.
+- **HEVC coverage is uneven.** Firefox can't decode HEVC at all (we degrade to
+  the lossy preview frames); Chrome's WebCodecs HEVC support depends on hardware.
+  The universal fallback plays the window back at 0.25× and captures each
+  presented frame — reliable but slow, and it can still miss frames under heavy
+  load.
+- **Demo clips bloat the repo.** The three sample videos (~16 MB) are committed
+  and served from Pages; they should move to Git LFS or external hosting.
+
 ## Why this is feasible
 
 The whole core — decode frames, segment per frame on WebGPU, composite — is a
